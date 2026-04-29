@@ -5,9 +5,20 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { ProtectedRoute, PublicAuthRoute } from "@/components/auth/ProtectedRoute";
+import { AppLayout } from "@/components/layout/AppLayout";
 import LoginPage from "./pages/Login.tsx";
 import RegisterPage from "./pages/Register.tsx";
 import DashboardPage from "./pages/Dashboard.tsx";
+import TransactionsPage from "./pages/Transactions.tsx";
+import CardsPage from "./pages/Cards.tsx";
+import InvestmentsPage from "./pages/Investments.tsx";
+import DebtsPage from "./pages/Debts.tsx";
+import SchedulePage from "./pages/Schedule.tsx";
+import ReportsPage from "./pages/Reports.tsx";
+import GoalsPage from "./pages/Goals.tsx";
+import ImportCsvPage from "./pages/ImportCsv.tsx";
+import FamilyPage from "./pages/Family.tsx";
+import SettingsPage from "./pages/Settings.tsx";
 import Index from "./pages/Index.tsx";
 import NotFound from "./pages/NotFound.tsx";
 
@@ -39,7 +50,26 @@ const App = () => (
               }
             />
             <Route
-              path="/dashboard"
+              element={
+                <ProtectedRoute>
+                  <AppLayout />
+                </ProtectedRoute>
+              }
+            >
+              <Route path="/dashboard" element={<DashboardPage />} />
+              <Route path="/transactions" element={<TransactionsPage />} />
+              <Route path="/cards" element={<CardsPage />} />
+              <Route path="/investments" element={<InvestmentsPage />} />
+              <Route path="/debts" element={<DebtsPage />} />
+              <Route path="/schedule" element={<SchedulePage />} />
+              <Route path="/reports" element={<ReportsPage />} />
+              <Route path="/goals" element={<GoalsPage />} />
+              <Route path="/import" element={<ImportCsvPage />} />
+              <Route path="/family" element={<FamilyPage />} />
+              <Route path="/settings" element={<SettingsPage />} />
+            </Route>
+            <Route
+              path="/dashboard-old"
               element={
                 <ProtectedRoute>
                   <DashboardPage />
