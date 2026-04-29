@@ -452,7 +452,7 @@ const DebtDetailPage = () => {
 
   return (
     <div className="space-y-5">
-      <Button asChild variant="ghost" className="h-9 px-2 text-sm" style={{ color: "#888" }}>
+      <Button asChild variant="ghost" className="h-9 px-2 text-sm text-muted-foreground">
         <Link to="/debts" className="hover:text-foreground">
           <ArrowLeft className="mr-2 h-4 w-4" />
           Voltar

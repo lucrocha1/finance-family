@@ -40,6 +40,16 @@ export default {
           DEFAULT: "hsl(var(--warning))",
           foreground: "hsl(var(--primary-foreground))",
         },
+        info: {
+          DEFAULT: "hsl(var(--info))",
+          foreground: "hsl(var(--primary-foreground))",
+        },
+        "accent-light": {
+          DEFAULT: "hsl(var(--accent-light))",
+          foreground: "hsl(var(--accent-light-foreground))",
+        },
+        "destructive-light": "hsl(var(--destructive-light))",
+        "warning-light": "hsl(var(--warning-light))",
         muted: {
           DEFAULT: "hsl(var(--muted))",
           foreground: "hsl(var(--muted-foreground))",
@@ -72,6 +82,13 @@ export default {
         lg: "var(--radius)",
         md: "calc(var(--radius) - 2px)",
         sm: "calc(var(--radius) - 4px)",
+      },
+      boxShadow: {
+        card: "var(--shadow-card)",
+        "card-hover": "var(--shadow-card-hover)",
+      },
+      backgroundImage: {
+        "gradient-accent": "var(--gradient-accent)",
       },
       keyframes: {
         "accordion-down": {

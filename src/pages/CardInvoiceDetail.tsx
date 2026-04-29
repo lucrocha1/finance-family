@@ -310,7 +310,7 @@ const CardInvoiceDetailPage = () => {
   return (
     <div className="space-y-6">
       <div>
-        <Button asChild variant="ghost" className="h-9 px-2 text-sm" style={{ color: "#888" }}>
+        <Button asChild variant="ghost" className="h-9 px-2 text-sm text-muted-foreground">
           <Link to="/cards" className="hover:text-foreground">
             <ArrowLeft className="mr-2 h-4 w-4" />
             Voltar
@@ -380,7 +380,7 @@ const CardInvoiceDetailPage = () => {
       <div className="rounded-xl border border-border bg-card">
         {transactions.length === 0 ? (
           <div className="flex flex-col items-center justify-center gap-3 py-14 text-muted-foreground">
-            <CreditCard className="h-12 w-12" style={{ color: "#333" }} />
+            <CreditCard className="h-12 w-12 text-muted-foreground/50" />
             <p className="text-sm">Nenhum gasto nesta fatura</p>
           </div>
         ) : (

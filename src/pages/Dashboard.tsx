@@ -33,6 +33,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { useAuth } from "@/contexts/AuthContext";
 import { useFamily } from "@/contexts/FamilyContext";
 import { supabase } from "@/integrations/supabase/client";
+import { useChartColors } from "@/lib/chartColors";
 import { cn } from "@/lib/utils";
 
 type TransactionRow = {
@@ -120,17 +121,20 @@ const getSparklinePath = (values: number[], width = 100, height = 60) => {
     .join(" ");
 };
 
-const tooltipStyle = {
-  background: "#1a1a24",
-  border: "1px solid #2e2e3e",
-  borderRadius: "0.75rem",
-  color: "#fff",
-  boxShadow: "0 8px 24px rgba(0,0,0,0.35)",
-};
-
 const DashboardPage = () => {
   const { user } = useAuth();
   const { family, members } = useFamily();
+  const chartColors = useChartColors();
+  const tooltipStyle = useMemo(
+    () => ({
+      background: chartColors.tooltipBg,
+      border: `1px solid ${chartColors.tooltipBorder}`,
+      borderRadius: "0.75rem",
+      color: chartColors.tooltipText,
+      boxShadow: "0 8px 24px rgba(0,0,0,0.18)",
+    }),
+    [chartColors],
+  );
 
   const [selectedMonth, setSelectedMonth] = useState(() => startOfMonth(new Date()));
   const [loading, setLoading] = useState(true);
@@ -443,7 +447,7 @@ const DashboardPage = () => {
                       `${(payload.payload?.percentage ?? 0).toFixed(1)}%`,
                     ]}
                     contentStyle={tooltipStyle}
-                    labelStyle={{ color: "#fff" }}
+                    labelStyle={{ color: chartColors.tooltipText }}
                   />
                 </PieChart>
               </ResponsiveContainer>
@@ -498,9 +502,9 @@ const DashboardPage = () => {
                       <stop offset="100%" stopColor="hsl(var(--primary))" stopOpacity={0} />
                     </linearGradient>
                   </defs>
-                  <CartesianGrid stroke="#1a1a24" strokeOpacity={0.65} vertical={false} />
-                  <XAxis dataKey="day" tick={{ fill: "#666", fontSize: 11 }} tickLine={false} axisLine={false} interval="preserveStartEnd" />
-                  <YAxis tick={{ fill: "#666", fontSize: 11 }} tickFormatter={(value) => formatCompactBRL(value)} tickLine={false} axisLine={false} width={72} />
+                  <CartesianGrid stroke={chartColors.grid} strokeOpacity={0.65} vertical={false} />
+                  <XAxis dataKey="day" tick={{ fill: chartColors.axis, fontSize: 11 }} tickLine={false} axisLine={false} interval="preserveStartEnd" />
+                  <YAxis tick={{ fill: chartColors.axis, fontSize: 11 }} tickFormatter={(value) => formatCompactBRL(value)} tickLine={false} axisLine={false} width={72} />
                   <Tooltip contentStyle={tooltipStyle} formatter={(value: number) => ptCurrency.format(Number(value || 0))} labelFormatter={(label) => `Dia ${label}`} />
                   <Area type="monotone" dataKey="saldo" stroke="none" fill="url(#flowGradient)" />
                   <Line type="monotone" dataKey="saldo" stroke="hsl(var(--primary))" strokeOpacity={flowTab === "projected" ? 0.4 : 1} strokeWidth={2} dot={false} />
@@ -591,12 +595,12 @@ const DashboardPage = () => {
             <div className="h-[200px]">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={dailyMovementData}>
-                  <CartesianGrid stroke="#1a1a24" strokeOpacity={0.65} vertical={false} />
-                  <XAxis dataKey="day" tick={{ fill: "#666", fontSize: 11 }} tickLine={false} axisLine={false} interval="preserveStartEnd" />
-                  <YAxis tick={{ fill: "#666", fontSize: 11 }} tickFormatter={(value) => formatCompactBRL(value)} tickLine={false} axisLine={false} width={72} />
+                  <CartesianGrid stroke={chartColors.grid} strokeOpacity={0.65} vertical={false} />
+                  <XAxis dataKey="day" tick={{ fill: chartColors.axis, fontSize: 11 }} tickLine={false} axisLine={false} interval="preserveStartEnd" />
+                  <YAxis tick={{ fill: chartColors.axis, fontSize: 11 }} tickFormatter={(value) => formatCompactBRL(value)} tickLine={false} axisLine={false} width={72} />
                   <Tooltip contentStyle={tooltipStyle} formatter={(value: number, name: string) => [ptCurrency.format(Math.abs(Number(value || 0))), name === "income" ? "Receitas" : "Despesas"]} labelFormatter={(label) => `Dia ${label}`} />
-                  <Bar dataKey="income" fill="#22c55e" radius={[2, 2, 0, 0]} />
-                  <Bar dataKey="expenseNegative" fill="#ef4444" radius={[2, 2, 0, 0]} />
+                  <Bar dataKey="income" fill={chartColors.income} radius={[2, 2, 0, 0]} />
+                  <Bar dataKey="expenseNegative" fill={chartColors.expense} radius={[2, 2, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </div>
