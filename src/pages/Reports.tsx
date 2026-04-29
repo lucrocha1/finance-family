@@ -475,9 +475,11 @@ const ReportsPage = () => {
                     formatter={(v: number) => [ptCurrency.format(v), "Valor"]}
                   />
                   <Legend
-                    onClick={(ev: { dataKey?: string }) => {
-                      if (!ev.dataKey) return;
-                      setHiddenTrendKeys((prev) => (prev.includes(ev.dataKey!) ? prev.filter((k) => k !== ev.dataKey) : [...prev, ev.dataKey]));
+                    onClick={(data) => {
+                      const rawKey = data?.dataKey;
+                      const key = typeof rawKey === "string" ? rawKey : typeof rawKey === "number" ? String(rawKey) : null;
+                      if (!key) return;
+                      setHiddenTrendKeys((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
                     }}
                   />
                   {trendByCategory.keys.map((cat) => (
