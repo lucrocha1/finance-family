@@ -101,6 +101,7 @@ const toMoneyDigits = (value: number) => String(Math.round(value * 100));
 const toMoneyValue = (digits: string) => Number(digits || "0") / 100;
 const toISODate = (date: Date) => new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
 const formatDate = (iso: string | null) => (iso ? new Date(`${iso}T00:00:00`).toLocaleDateString("pt-BR") : "-");
+const formatPct = (value: number) => value.toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 
 const InvestmentsPage = () => {
   const { family, members } = useFamily();
@@ -440,7 +441,7 @@ const InvestmentsPage = () => {
           </div>
           <p className={cn("mt-3 text-2xl font-bold", summary.profit >= 0 ? "text-[hsl(var(--success))]" : "text-destructive")}>
             {ptCurrency.format(summary.profit)} ({summary.profit >= 0 ? "+" : ""}
-            {summary.profitPct.toFixed(1)}%)
+            {formatPct(summary.profitPct)}%)
           </p>
         </div>
 
@@ -523,7 +524,7 @@ const InvestmentsPage = () => {
                     style={{ backgroundColor: profitPct >= 0 ? "hsl(var(--success) / 0.15)" : "hsl(var(--destructive) / 0.15)" }}
                   >
                     {profitPct >= 0 ? "+" : ""}
-                    {profitPct.toFixed(1)}%
+                    {formatPct(profitPct)}%
                   </span>
                 </div>
 
@@ -586,7 +587,16 @@ const InvestmentsPage = () => {
                   <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => openEdit(item)} aria-label="Editar investimento">
                     <Pencil className="h-4 w-4" />
                   </Button>
-                  <Button size="icon" variant="ghost" className="h-8 w-8 text-muted-foreground hover:text-destructive" onClick={() => openEdit(item)} aria-label="Excluir investimento">
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                    onClick={() => {
+                      setEditing(item);
+                      setDeleteOpen(true);
+                    }}
+                    aria-label="Excluir investimento"
+                  >
                     <Trash2 className="h-4 w-4" />
                   </Button>
                 </div>
