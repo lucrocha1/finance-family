@@ -50,6 +50,12 @@ export default {
         },
         "destructive-light": "hsl(var(--destructive-light))",
         "warning-light": "hsl(var(--warning-light))",
+        brandDark: {
+          DEFAULT: "hsl(var(--brand-dark))",
+          foreground: "hsl(var(--brand-dark-foreground))",
+          muted: "hsl(var(--brand-dark-muted))",
+        },
+        "accent-bright": "hsl(var(--accent-bright))",
         muted: {
           DEFAULT: "hsl(var(--muted))",
           foreground: "hsl(var(--muted-foreground))",

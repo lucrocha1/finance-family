@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import {
   ArrowDownRight,
   ArrowUpRight,
@@ -9,7 +9,10 @@ import {
   ChevronRight,
   CreditCard,
   Layers,
+  MoreHorizontal,
+  Plus,
   RefreshCw,
+  Send,
   UserCircle2,
 } from "lucide-react";
 import {
@@ -124,6 +127,7 @@ const getSparklinePath = (values: number[], width = 100, height = 60) => {
 const DashboardPage = () => {
   const { user } = useAuth();
   const { family, members } = useFamily();
+  const navigate = useNavigate();
   const chartColors = useChartColors();
   const tooltipStyle = useMemo(
     () => ({
@@ -390,34 +394,58 @@ const DashboardPage = () => {
         </Button>
       </div>
 
-      <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
-        <Card className="rounded-xl border-border bg-card">
-          <CardHeader className="space-y-3">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.5px] text-muted-foreground">Saldo do período</p>
-                <CardDescription className="mt-2 text-sm text-muted-foreground">Saldo (Receitas - Despesas) no período selecionado.</CardDescription>
-              </div>
-              <span className={cn("inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold", balanceVariation.improved ? "bg-success/20 text-success" : "bg-destructive/20 text-destructive")}>
+      <div className="relative overflow-hidden rounded-2xl bg-brandDark p-6 text-white shadow-card sm:p-8">
+        <svg
+          aria-hidden="true"
+          className="pointer-events-none absolute right-0 top-0 h-full w-1/2 text-white/[0.05]"
+          viewBox="0 0 400 200"
+          preserveAspectRatio="xMaxYMid slice"
+        >
+          <defs>
+            <pattern id="heroPattern" x="0" y="0" width="48" height="48" patternUnits="userSpaceOnUse">
+              <path d="M0 24 L24 0 L48 24 L24 48 Z" fill="none" stroke="currentColor" strokeWidth="1" />
+            </pattern>
+          </defs>
+          <rect width="400" height="200" fill="url(#heroPattern)" />
+        </svg>
+
+        <div className="relative flex flex-col gap-6 sm:flex-row sm:items-end sm:justify-between">
+          <div className="space-y-2">
+            <p className="text-xs font-semibold uppercase tracking-[1px] text-brandDark-muted">Saldo do período</p>
+            <div className="flex items-baseline gap-3">
+              <p className="text-4xl font-bold tabular-nums sm:text-5xl">{ptCurrency.format(totals.balance)}</p>
+              <span className={cn("text-sm font-semibold", balanceVariation.improved ? "text-emerald-300" : "text-red-300")}>
                 {balanceVariation.improved ? "↗" : "↘"} {balanceVariation.value.toFixed(1)}%
               </span>
             </div>
-            <CardTitle className={cn("text-3xl font-bold tabular-nums", totals.balance >= 0 ? "text-success" : "text-destructive")}>{ptCurrency.format(totals.balance)}</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {sparkPath ? (
-              <svg viewBox="0 0 100 60" className="h-[60px] w-full" role="img" aria-label="Evolução diária do saldo acumulado">
-                <path d={sparkPath} fill="none" stroke="hsl(var(--primary))" strokeWidth="1.4" strokeLinecap="round" />
+            {sparkPath && (
+              <svg viewBox="0 0 100 30" className="h-[30px] w-full max-w-[260px]" role="img" aria-label="Evolução do saldo">
+                <path d={getSparklinePath(dailyCumulative, 100, 30)} fill="none" stroke="rgba(255,255,255,0.6)" strokeWidth="1.4" strokeLinecap="round" />
               </svg>
-            ) : (
-              <div className="flex h-[60px] items-center justify-center gap-2 text-sm text-muted-foreground">
-                <CalendarCheck2 className="h-4 w-4 text-muted-foreground" />
-                Sem dados no período
-              </div>
             )}
-          </CardContent>
-        </Card>
+          </div>
 
+          <div className="flex flex-wrap items-center gap-2">
+            <Button size="pill" onClick={() => navigate("/transactions")} className="gap-2">
+              <Plus className="h-4 w-4" />
+              Adicionar
+            </Button>
+            <Button size="pill" variant="outline-dark" onClick={() => navigate("/transactions")} className="gap-2">
+              <Send className="h-4 w-4" />
+              Transferir
+            </Button>
+            <Button size="pill" variant="outline-dark" onClick={() => navigate("/schedule")} className="gap-2">
+              <RefreshCw className="h-4 w-4" />
+              Agendar
+            </Button>
+            <Button size="icon-pill" variant="ghost-dark" onClick={() => navigate("/settings")} aria-label="Mais ações">
+              <MoreHorizontal className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
         <Card className="rounded-xl border-border bg-card">
           <CardHeader className="space-y-2">
             <div className="flex items-center justify-between">

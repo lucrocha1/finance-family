@@ -105,16 +105,16 @@ export const AppLayout = () => {
         onClick={() => setMobileOpen(false)}
         className={({ isActive }) =>
           cn(
-            "mx-3 flex items-center gap-3 rounded-[10px] px-3 py-2.5 text-sm font-medium transition-all duration-200",
+            "relative mx-3 flex items-center gap-3 rounded-[10px] px-3 py-2.5 text-sm font-medium transition-all duration-200",
             isActive
-              ? "bg-primary/15 text-primary"
+              ? "bg-sidebar-accent text-sidebar-accent-foreground before:absolute before:left-[-12px] before:top-1/2 before:h-1.5 before:w-1.5 before:-translate-y-1/2 before:rounded-full before:bg-primary"
               : "text-muted-foreground hover:bg-[hsl(var(--sidebar-hover-bg))] hover:text-[hsl(var(--sidebar-hover-foreground))]",
           )
         }
       >
         {({ isActive }) => (
           <>
-            <item.icon className={cn("h-5 w-5 shrink-0 transition-colors duration-200", isActive ? "text-primary" : "text-muted-foreground")} />
+            <item.icon className={cn("h-5 w-5 shrink-0 transition-colors duration-200", isActive ? "text-primary" : "text-muted-foreground group-hover:text-foreground")} />
             {!isCollapsed && <span className="truncate">{item.label}</span>}
           </>
         )}
