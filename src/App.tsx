@@ -16,6 +16,7 @@ import CardsPage from "./pages/Cards.tsx";
 import CardInvoiceDetailPage from "./pages/CardInvoiceDetail.tsx";
 import InvestmentsPage from "./pages/Investments.tsx";
 import DebtsPage from "./pages/Debts.tsx";
+import DebtDetailPage from "./pages/DebtDetail.tsx";
 import SchedulePage from "./pages/Schedule.tsx";
 import ReportsPage from "./pages/Reports.tsx";
 import GoalsPage from "./pages/Goals.tsx";
@@ -77,6 +78,7 @@ const App = () => (
               <Route path="/cards/:id" element={<CardInvoiceDetailPage />} />
               <Route path="/investments" element={<InvestmentsPage />} />
               <Route path="/debts" element={<DebtsPage />} />
+              <Route path="/debts/:id" element={<DebtDetailPage />} />
               <Route path="/schedule" element={<SchedulePage />} />
               <Route path="/reports" element={<ReportsPage />} />
               <Route path="/goals" element={<GoalsPage />} />
