@@ -31,6 +31,7 @@ import { toast } from "@/components/ui/sonner";
 import { useAuth } from "@/contexts/AuthContext";
 import { useFamily } from "@/contexts/FamilyContext";
 import { supabase } from "@/integrations/supabase/client";
+import { ensureFamily } from "@/lib/familyGuard";
 import { cn } from "@/lib/utils";
 
 type TxType = "income" | "expense" | "transfer" | string;
@@ -319,7 +320,8 @@ const TransactionsPage = () => {
   }, [accountId, amountCents, cardId, categoryId, description, formType, fromAccountId, toAccountId]);
 
   const persist = async () => {
-    if (!family?.id || !user?.id) return;
+    const ctx = ensureFamily(family?.id, user?.id);
+    if (!ctx) return;
     const parsed = formSchema.safeParse({
       type: formType,
       description,
@@ -411,8 +413,8 @@ const TransactionsPage = () => {
       }
     } else if (parsed.data.type === "transfer") {
       const payload = [
-        { ...base, type: "transfer", account_id: parsed.data.fromAccountId, user_id: user.id, family_id: family.id },
-        { ...base, type: "transfer", account_id: parsed.data.toAccountId, user_id: user.id, family_id: family.id },
+        { ...base, type: "transfer", account_id: parsed.data.fromAccountId, user_id: ctx.userId, family_id: ctx.familyId },
+        { ...base, type: "transfer", account_id: parsed.data.toAccountId, user_id: ctx.userId, family_id: ctx.familyId },
       ];
       const { error } = await supabase.from("transactions").insert(payload);
       if (error) errorMessage = error.message;
@@ -433,14 +435,14 @@ const TransactionsPage = () => {
           installment_current: index + 1,
           installment_total: count,
           type: "expense",
-          user_id: user.id,
-          family_id: family.id,
+          user_id: ctx.userId,
+          family_id: ctx.familyId,
         };
       });
       const { error } = await supabase.from("transactions").insert(rows);
       if (error) errorMessage = error.message;
     } else {
-      const { error } = await supabase.from("transactions").insert({ ...base, type: parsed.data.type, user_id: user.id, family_id: family.id });
+      const { error } = await supabase.from("transactions").insert({ ...base, type: parsed.data.type, user_id: ctx.userId, family_id: ctx.familyId });
       if (error) errorMessage = error.message;
     }
 

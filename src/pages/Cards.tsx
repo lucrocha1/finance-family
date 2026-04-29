@@ -22,6 +22,7 @@ import { toast } from "@/components/ui/sonner";
 import { useAuth } from "@/contexts/AuthContext";
 import { useFamily } from "@/contexts/FamilyContext";
 import { supabase } from "@/integrations/supabase/client";
+import { ensureFamily } from "@/lib/familyGuard";
 
 type CardBrand = "visa" | "mastercard" | "elo" | "amex" | "hipercard" | "outro";
 
@@ -249,7 +250,8 @@ const CardsPage = () => {
   const canSave = name.trim().length >= 2 && creditLimitCents > 0 && Number(closingDay) >= 1 && Number(closingDay) <= 31 && Number(dueDay) >= 1 && Number(dueDay) <= 31;
 
   const saveCard = async () => {
-    if (!family?.id || !user?.id) return;
+    const ctx = ensureFamily(family?.id, user?.id);
+    if (!ctx) return;
 
     const parsed = formSchema.safeParse({
       name,
@@ -288,9 +290,9 @@ const CardsPage = () => {
         result = await supabase.from("cards").update(payloadWithLastDigits).eq("id", editing.id);
       }
     } else {
-      result = await supabase.from("cards").insert({ ...payloadWithLast4, user_id: user.id, family_id: family.id });
+      result = await supabase.from("cards").insert({ ...payloadWithLast4, user_id: ctx.userId, family_id: ctx.familyId });
       if (result.error && result.error.message.toLowerCase().includes("last4")) {
-        result = await supabase.from("cards").insert({ ...payloadWithLastDigits, user_id: user.id, family_id: family.id });
+        result = await supabase.from("cards").insert({ ...payloadWithLastDigits, user_id: ctx.userId, family_id: ctx.familyId });
       }
     }
 
