@@ -376,12 +376,12 @@ const DashboardPage = () => {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-center gap-2 rounded-xl border border-border bg-card px-3 py-2">
-        <Button variant="ghost" size="icon" className="h-9 w-9" onClick={() => setSelectedMonth((prev) => new Date(prev.getFullYear(), prev.getMonth() - 1, 1))} aria-label="Mês anterior">
+      <div className="mx-auto flex w-full max-w-sm items-center justify-between rounded-xl border border-border bg-card px-2 py-2">
+        <Button variant="ghost" size="icon" className="h-9 w-9" onClick={() => setSelectedMonth((prev) => new Date(prev.getFullYear(), prev.getMonth() - 1, 1))} aria-label="◀ Mês anterior">
           <ChevronLeft className="h-4 w-4" />
         </Button>
-        <p className="min-w-[170px] text-center text-base font-bold text-foreground">{capitalize(formatMonthYear(selectedMonth))}</p>
-        <Button variant="ghost" size="icon" className="h-9 w-9" onClick={() => setSelectedMonth((prev) => new Date(prev.getFullYear(), prev.getMonth() + 1, 1))} aria-label="Próximo mês">
+        <p className="min-w-[190px] text-center text-base font-bold text-foreground">{capitalize(formatMonthYear(selectedMonth))}</p>
+        <Button variant="ghost" size="icon" className="h-9 w-9" onClick={() => setSelectedMonth((prev) => new Date(prev.getFullYear(), prev.getMonth() + 1, 1))} aria-label="Próximo mês ▶">
           <ChevronRight className="h-4 w-4" />
         </Button>
       </div>
@@ -614,7 +614,7 @@ const DashboardPage = () => {
           <CardContent className="space-y-2"><p className="text-xs font-semibold uppercase tracking-[0.5px] text-muted-foreground">Dia mais movimentado</p>{busiestDay ? <p className="text-2xl font-bold">{busiestDay}</p> : <div className="flex items-center gap-2 text-sm text-muted-foreground"><CalendarCheck2 className="h-4 w-4 text-muted-foreground" />Sem dados no período</div>}</CardContent>
         </Card>
 
-        <Card className="rounded-xl border-border bg-card md:col-span-2 lg:col-span-3">
+        <Card className="rounded-xl border-border bg-card">
           <CardHeader><CardTitle className="text-lg font-semibold">Despesas por Usuário</CardTitle></CardHeader>
           <CardContent className="space-y-3">
             {expensesByUser.every((entry) => entry.total === 0) ? (
