@@ -16,12 +16,11 @@ import {
 } from "lucide-react";
 import {
   Area,
+  AreaChart,
   Bar,
   BarChart,
   CartesianGrid,
   Cell,
-  Line,
-  LineChart,
   Pie,
   PieChart,
   ResponsiveContainer,
@@ -507,10 +506,11 @@ const DashboardPage = () => {
           <CardContent>
             <div className="h-[200px]">
               <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={flowData}>
+                <AreaChart data={flowData}>
                   <defs>
                     <linearGradient id="flowGradient" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="hsl(var(--primary))" stopOpacity={0.1} />
+                      <stop offset="0%" stopColor="hsl(var(--primary))" stopOpacity={0.55} />
+                      <stop offset="60%" stopColor="hsl(var(--primary))" stopOpacity={0.18} />
                       <stop offset="100%" stopColor="hsl(var(--primary))" stopOpacity={0} />
                     </linearGradient>
                   </defs>
@@ -518,9 +518,8 @@ const DashboardPage = () => {
                   <XAxis dataKey="day" tick={{ fill: chartColors.axis, fontSize: 11 }} tickLine={false} axisLine={false} interval="preserveStartEnd" />
                   <YAxis tick={{ fill: chartColors.axis, fontSize: 11 }} tickFormatter={(value) => formatCompactBRL(value)} tickLine={false} axisLine={false} width={72} />
                   <Tooltip contentStyle={tooltipStyle} formatter={(value: number) => ptCurrency.format(Number(value || 0))} labelFormatter={(label) => `Dia ${label}`} />
-                  <Area type="monotone" dataKey="saldo" stroke="none" fill="url(#flowGradient)" />
-                  <Line type="monotone" dataKey="saldo" stroke="hsl(var(--primary))" strokeOpacity={flowTab === "projected" ? 0.4 : 1} strokeWidth={2} dot={false} />
-                </LineChart>
+                  <Area type="monotone" dataKey="saldo" stroke="hsl(var(--primary))" strokeWidth={2} strokeOpacity={flowTab === "projected" ? 0.4 : 1} fill="url(#flowGradient)" />
+                </AreaChart>
               </ResponsiveContainer>
             </div>
             {!flowData.some((row) => row.change !== 0) && <p className="mt-2 text-center text-sm text-muted-foreground">Sem movimentações no período</p>}

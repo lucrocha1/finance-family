@@ -11,14 +11,14 @@
 @layer base {
   :root {
     /* Surfaces */
-    --background: 220 25% 98%;        /* #F8F9FC */
-    --foreground: 220 39% 11%;        /* #111827 */
+    --background: 215 28% 94%;        /* #E9ECF2 — fundo mais marcado p/ cards se destacarem */
+    --foreground: 222 47% 8%;         /* #0B1220 — texto preto-azulado mais forte */
 
     --card: 0 0% 100%;                /* #FFFFFF */
-    --card-foreground: 220 39% 11%;
+    --card-foreground: 222 47% 8%;
 
     --popover: 0 0% 100%;
-    --popover-foreground: 220 39% 11%;
+    --popover-foreground: 222 47% 8%;
 
     /* Brand */
     --primary: 160 84% 39%;           /* #10B981 emerald */
@@ -35,7 +35,7 @@
     --secondary-foreground: 220 39% 11%;
 
     --muted: 220 14% 96%;
-    --muted-foreground: 220 9% 46%;   /* #6B7280 */
+    --muted-foreground: 220 14% 32%;  /* #424B5C — bem mais escuro p/ legibilidade */
 
     /* Accent (badges/tags claro) */
     --accent: 152 81% 96%;            /* #ECFDF5 */
@@ -56,7 +56,7 @@
     --info-hover: 221 83% 53%;
 
     /* Borders / focus */
-    --border: 220 13% 91%;            /* #E5E7EB */
+    --border: 220 13% 82%;            /* #C8CCD3 — borders mais visíveis */
     --input: 220 14% 96%;
     --ring: 160 84% 39%;
 
@@ -81,16 +81,16 @@
     --overlay: 220 39% 11%;
 
     /* Effects */
-    --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.04);
-    --shadow-card-hover: 0 4px 12px rgba(0, 0, 0, 0.08), 0 2px 4px rgba(0, 0, 0, 0.04);
+    --shadow-card: 0 1px 3px rgba(15, 23, 42, 0.10), 0 2px 6px rgba(15, 23, 42, 0.06);
+    --shadow-card-hover: 0 6px 16px rgba(15, 23, 42, 0.12), 0 3px 8px rgba(15, 23, 42, 0.08);
     --gradient-accent: linear-gradient(135deg, hsl(160 84% 39%), hsl(160 84% 32%));
 
-    /* Glassmorphism — clean, subtle */
-    --glass-bg: 0 0% 100% / 0.65;
-    --glass-bg-strong: 0 0% 100% / 0.85;
-    --glass-border: 220 13% 91% / 0.8;
-    --glass-blur: 18px;
-    --glass-shadow: 0 1px 2px rgba(15, 62, 60, 0.04), 0 4px 16px rgba(15, 62, 60, 0.06);
+    /* Glassmorphism — sólido o bastante p/ contraste em telas claras */
+    --glass-bg: 0 0% 100% / 0.92;
+    --glass-bg-strong: 0 0% 100% / 0.98;
+    --glass-border: 220 13% 82% / 1;
+    --glass-blur: 14px;
+    --glass-shadow: 0 1px 3px rgba(15, 23, 42, 0.08), 0 6px 20px rgba(15, 23, 42, 0.08);
     --glow-1: 160 60% 80%;            /* very soft mint wash */
     --glow-2: 168 30% 92%;            /* near-white teal */
   }
