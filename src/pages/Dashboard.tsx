@@ -107,20 +107,6 @@ const formatCompactBRL = (value: number) => {
   return ptCurrency.format(value);
 };
 
-const getSparklinePath = (values: number[], width = 100, height = 60) => {
-  if (values.length < 2) return "";
-  const max = Math.max(...values);
-  const min = Math.min(...values);
-  const range = max - min || 1;
-  return values
-    .map((value, index) => {
-      const x = (index / (values.length - 1)) * width;
-      const y = height - ((value - min) / range) * (height - 6) - 3;
-      return `${index === 0 ? "M" : "L"} ${x.toFixed(2)} ${y.toFixed(2)}`;
-    })
-    .join(" ");
-};
-
 const DashboardPage = () => {
   const { family } = useFamily();
   const navigate = useNavigate();
@@ -243,23 +229,7 @@ const DashboardPage = () => {
     return { improved, value: percentage };
   }, [totals.balance, totals.previousBalance]);
 
-  const dailyCumulative = useMemo(() => {
-    const daysInMonth = monthEnd.getDate();
-    const dailyChanges = Array.from({ length: daysInMonth }, () => 0);
-    transactions.forEach((tx) => {
-      const txDate = new Date(`${tx.date}T00:00:00`);
-      const dayIndex = txDate.getDate() - 1;
-      if (dayIndex < 0 || dayIndex >= dailyChanges.length) return;
-      dailyChanges[dayIndex] += tx.type === "income" ? Number(tx.amount || 0) : -Number(tx.amount || 0);
-    });
-    let running = 0;
-    return dailyChanges.map((change) => {
-      running += change;
-      return running;
-    });
-  }, [monthEnd, transactions]);
-
-  const totalBankBalance = useMemo(() => accounts.reduce((sum, account) => sum + Number(account.balance || 0), 0), [accounts]);
+const totalBankBalance = useMemo(() => accounts.reduce((sum, account) => sum + Number(account.balance || 0), 0), [accounts]);
 
   const quickSummary = useMemo(() => {
     const pendingInMonth = scheduledMonth.filter((item) => !item.is_paid);
@@ -366,7 +336,6 @@ const DashboardPage = () => {
 
   const flowLastValue = flowData[flowData.length - 1]?.saldo ?? 0;
   const totalMovements = dailyMovementData.reduce((sum, row) => sum + row.income + row.expense, 0);
-  const sparkPath = useMemo(() => getSparklinePath(dailyCumulative), [dailyCumulative]);
 
   return (
     <div className="space-y-6">
@@ -415,11 +384,6 @@ const DashboardPage = () => {
                 {accounts.length} conta{accounts.length === 1 ? "" : "s"}
               </span>
             </div>
-            {sparkPath && (
-              <svg viewBox="0 0 100 30" className="h-[30px] w-full max-w-[260px]" role="img" aria-label="Evolução do saldo">
-                <path d={getSparklinePath(dailyCumulative, 100, 30)} fill="none" stroke="rgba(255,255,255,0.6)" strokeWidth="1.4" strokeLinecap="round" />
-              </svg>
-            )}
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
@@ -532,7 +496,7 @@ const DashboardPage = () => {
                   <XAxis dataKey="day" tick={{ fill: chartColors.axis, fontSize: 11 }} tickLine={false} axisLine={false} interval="preserveStartEnd" />
                   <YAxis tick={{ fill: chartColors.axis, fontSize: 11 }} tickFormatter={(value) => formatCompactBRL(value)} tickLine={false} axisLine={false} width={72} />
                   <Tooltip contentStyle={tooltipStyle} formatter={(value: number) => ptCurrency.format(Number(value || 0))} labelFormatter={(label) => `Dia ${label}`} />
-                  <Area type="natural" dataKey="saldo" stroke="hsl(var(--primary))" strokeWidth={2} strokeOpacity={flowTab === "projected" ? 0.4 : 1} fill="url(#flowGradient)" />
+                  <Area type="monotone" dataKey="saldo" stroke="hsl(var(--primary))" strokeWidth={2} strokeOpacity={flowTab === "projected" ? 0.4 : 1} fill="url(#flowGradient)" />
                 </AreaChart>
               </ResponsiveContainer>
             </div>
