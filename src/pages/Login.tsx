@@ -95,7 +95,7 @@ const LoginPage = () => {
 
           <Button
             type="submit"
-            className="h-11 w-full rounded-lg bg-primary font-semibold text-primary-foreground hover:bg-primary/90"
+            className="h-11 w-full rounded-lg bg-primary font-semibold text-primary-foreground hover:bg-primary-hover"
             disabled={submitting || !isSupabaseConfigured}
           >
             {submitting ? "Entrando..." : "Entrar"}
@@ -104,7 +104,7 @@ const LoginPage = () => {
 
         <p className="text-center text-sm text-muted-foreground">
           Não tem conta?{" "}
-          <Link to="/register" className="font-semibold text-primary hover:text-primary/90">
+          <Link to="/register" className="font-semibold text-primary hover:text-accent-hover">
             Cadastre-se
           </Link>
         </p>

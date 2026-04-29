@@ -181,7 +181,7 @@ const RegisterPage = () => {
 
           <Button
             type="submit"
-            className="h-11 w-full rounded-lg bg-primary font-semibold text-primary-foreground hover:bg-primary/90"
+            className="h-11 w-full rounded-lg bg-primary font-semibold text-primary-foreground hover:bg-primary-hover"
             disabled={submitting || !isSupabaseConfigured}
           >
             {submitting ? "Criando conta..." : "Criar conta"}
@@ -190,7 +190,7 @@ const RegisterPage = () => {
 
         <p className="text-center text-sm text-muted-foreground">
           Já tem conta?{" "}
-          <Link to="/login" className="font-semibold text-primary hover:text-primary/90">
+          <Link to="/login" className="font-semibold text-primary hover:text-accent-hover">
             Entrar
           </Link>
         </p>
