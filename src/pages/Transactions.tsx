@@ -10,6 +10,7 @@ import {
   CreditCard,
   Loader2,
   Pencil,
+  Repeat,
   Trash2,
   TrendingDown,
   TrendingUp,
@@ -57,6 +58,7 @@ type TransactionRow = {
   installment_group_id?: string | null;
   is_recurring?: boolean | null;
   recurrence_type?: string | null;
+  recurrence_parent_id?: string | null;
   categories?: { id?: string; name?: string; color?: string | null; type?: string | null; icon?: string | null } | { id?: string; name?: string; color?: string | null; type?: string | null; icon?: string | null }[] | null;
   accounts?: { id?: string; name?: string; institution?: string | null } | { id?: string; name?: string; institution?: string | null }[] | null;
   cards?: { id?: string; name?: string; brand?: string | null; last4?: string | null } | { id?: string; name?: string; brand?: string | null; last4?: string | null }[] | null;
@@ -357,8 +359,11 @@ const TransactionsPage = () => {
       category_id: parsed.data.type === "transfer" ? null : parsed.data.categoryId,
       account_id: parsed.data.type === "transfer" ? parsed.data.fromAccountId : parsed.data.type === "expense" && parsed.data.cardId ? null : parsed.data.accountId,
       card_id: parsed.data.type === "expense" ? parsed.data.cardId : null,
-      is_recurring: parsed.data.type === "expense" ? parsed.data.isRecurring : false,
-      recurrence_type: parsed.data.type === "expense" && parsed.data.isRecurring ? parsed.data.recurrenceType : null,
+      is_recurring: parsed.data.type !== "transfer" ? parsed.data.isRecurring : false,
+      recurrence_type: parsed.data.type !== "transfer" && parsed.data.isRecurring ? parsed.data.recurrenceType : null,
+      recurrence_day: parsed.data.type !== "transfer" && parsed.data.isRecurring && parsed.data.recurrenceType === "monthly"
+        ? new Date(parsed.data.date).getDate()
+        : null,
       is_installment: parsed.data.type === "expense" ? parsed.data.isInstallment : false,
     };
 
@@ -466,14 +471,28 @@ const TransactionsPage = () => {
 
   const executeDelete = async (mode: "one" | "remaining" | "all") => {
     if (!deleteTarget) return;
+    const isRecurringTarget = Boolean(deleteTarget.is_recurring) || Boolean(deleteTarget.recurrence_parent_id);
+    const recurrenceRootId = deleteTarget.recurrence_parent_id ?? (deleteTarget.is_recurring ? deleteTarget.id : null);
     let query = supabase.from("transactions").delete();
 
-    if (mode === "one" || !deleteTarget.installment_group_id) {
+    if (mode === "one") {
       query = query.eq("id", deleteTarget.id);
-    } else if (mode === "remaining") {
-      query = query.eq("installment_group_id", deleteTarget.installment_group_id).gte("installment_current", deleteTarget.installment_current ?? 1);
+    } else if (deleteTarget.installment_group_id) {
+      if (mode === "remaining") {
+        query = query.eq("installment_group_id", deleteTarget.installment_group_id).gte("installment_current", deleteTarget.installment_current ?? 1);
+      } else {
+        query = query.eq("installment_group_id", deleteTarget.installment_group_id);
+      }
+    } else if (isRecurringTarget && recurrenceRootId) {
+      if (mode === "remaining") {
+        query = query
+          .or(`id.eq.${recurrenceRootId},recurrence_parent_id.eq.${recurrenceRootId}`)
+          .gte("date", deleteTarget.date);
+      } else {
+        query = query.or(`id.eq.${recurrenceRootId},recurrence_parent_id.eq.${recurrenceRootId}`);
+      }
     } else {
-      query = query.eq("installment_group_id", deleteTarget.installment_group_id);
+      query = query.eq("id", deleteTarget.id);
     }
 
     const { error } = await query;
@@ -489,7 +508,7 @@ const TransactionsPage = () => {
       resetForm();
     }
     await loadData();
-    toast.error("Transação excluída");
+    toast.success("Transação excluída");
   };
 
   const markPaid = async (tx: TransactionRow) => {
@@ -559,13 +578,14 @@ const TransactionsPage = () => {
                     const memberName = member?.name || profileJoined?.full_name?.split(" ")[0] || "Usuário";
                     const memberInitials = member?.initials || memberName.slice(0, 1).toUpperCase();
                     const installmentLabel = tx.installment_current && tx.installment_total ? ` (${tx.installment_current}/${tx.installment_total})` : "";
+                    const isRecurringRow = Boolean(tx.is_recurring) || Boolean(tx.recurrence_parent_id);
                     const valuePrefix = tx.type === "income" ? "+" : tx.type === "expense" ? "-" : "";
                     const valueColor = tx.type === "income" ? "text-success" : tx.type === "expense" ? "text-destructive" : "text-info";
 
                     return (
                       <TableRow key={tx.id} className="group cursor-pointer border-b border-border bg-transparent hover:bg-secondary" onClick={() => openEdit(tx)}>
                         <TableCell className="px-4 py-3 text-sm text-muted-foreground">{formatDateDDMM(tx.date)}</TableCell>
-                        <TableCell className="px-4 py-3 text-sm font-medium text-foreground"><span>{tx.description || "Sem descrição"}</span>{installmentLabel && <span className="text-muted-foreground">{installmentLabel}</span>}</TableCell>
+                        <TableCell className="px-4 py-3 text-sm font-medium text-foreground"><span>{tx.description || "Sem descrição"}</span>{installmentLabel && <span className="text-muted-foreground">{installmentLabel}</span>}{isRecurringRow && <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-semibold text-primary"><Repeat className="h-3 w-3" />Recorrente</span>}</TableCell>
                         <TableCell className="px-4 py-3 text-sm text-muted-foreground"><div className="flex items-center gap-2"><span className="h-2 w-2 rounded-full" style={{ backgroundColor: category?.color || "hsl(var(--muted-foreground))" }} />{category?.name || "Sem categoria"}</div></TableCell>
                         <TableCell className={cn("px-4 py-3 text-sm font-semibold tabular-nums", valueColor)}>
                           {computedStatus !== "paid" && (
@@ -620,6 +640,68 @@ const TransactionsPage = () => {
               <div className="space-y-2"><Label className="text-xs text-muted-foreground">Conta</Label><Select value={accountId || "none"} onValueChange={(value) => setAccountId(value === "none" ? "" : value)}><SelectTrigger className="h-[42px] rounded-lg border-border bg-secondary text-foreground"><SelectValue placeholder="Selecione" /></SelectTrigger><SelectContent className="border-border bg-card text-card-foreground">{accounts.map((account) => <SelectItem key={account.id} value={account.id}>{account.name}</SelectItem>)}</SelectContent></Select></div>
             )}
 
+            {formType !== "transfer" && !editing && (
+              <div className="space-y-3 rounded-lg border border-border bg-secondary/30 p-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <Label className="text-sm font-medium text-foreground">Repetir</Label>
+                    <p className="text-xs text-muted-foreground">Cria uma {formType === "income" ? "receita" : "despesa"} recorrente</p>
+                  </div>
+                  <Switch
+                    checked={isRecurring}
+                    onCheckedChange={(checked) => {
+                      setIsRecurring(checked);
+                      if (checked) setIsInstallment(false);
+                    }}
+                  />
+                </div>
+                {isRecurring && (
+                  <div className="space-y-2">
+                    <Label className="text-xs text-muted-foreground">Frequência</Label>
+                    <Select value={recurrenceType} onValueChange={(value) => setRecurrenceType(value as RecurrenceType)}>
+                      <SelectTrigger className="h-[42px] rounded-lg border-border bg-secondary text-foreground"><SelectValue /></SelectTrigger>
+                      <SelectContent className="border-border bg-card text-card-foreground">
+                        <SelectItem value="weekly">Semanal</SelectItem>
+                        <SelectItem value="monthly">Mensal</SelectItem>
+                        <SelectItem value="yearly">Anual</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {formType === "expense" && !editing && (
+              <div className="space-y-3 rounded-lg border border-border bg-secondary/30 p-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <Label className="text-sm font-medium text-foreground">Parcelar</Label>
+                    <p className="text-xs text-muted-foreground">Divide o valor em várias parcelas mensais</p>
+                  </div>
+                  <Switch
+                    checked={isInstallment}
+                    onCheckedChange={(checked) => {
+                      setIsInstallment(checked);
+                      if (checked) setIsRecurring(false);
+                    }}
+                  />
+                </div>
+                {isInstallment && (
+                  <div className="space-y-2">
+                    <Label className="text-xs text-muted-foreground">Número de parcelas (2 a 48)</Label>
+                    <Input
+                      type="number"
+                      min={2}
+                      max={48}
+                      value={installments}
+                      onChange={(e) => setInstallments(Math.min(48, Math.max(2, Number(e.target.value) || 2)))}
+                      className="h-[42px] rounded-lg border-border bg-secondary text-foreground"
+                    />
+                  </div>
+                )}
+              </div>
+            )}
+
             <div className="space-y-2"><Label className="text-xs text-muted-foreground">Notas</Label><Textarea value={notes} onChange={(e) => setNotes(e.target.value.slice(0, 600))} rows={3} className="resize-y rounded-lg border-border bg-secondary text-foreground" /></div>
             {formError && <p className="text-sm text-destructive">{formError}</p>}
 
@@ -634,10 +716,12 @@ const TransactionsPage = () => {
       <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
         <DialogContent className="max-w-md rounded-xl border-border bg-card">
           <DialogHeader><DialogTitle className="text-lg font-bold text-foreground">Excluir transação</DialogTitle></DialogHeader>
-          {!deleteTarget?.installment_group_id ? (
-            <div className="space-y-4"><p className="text-sm text-muted-foreground">Tem certeza que deseja excluir esta transação?</p><div className="flex justify-end gap-2"><Button variant="outline" className="border-border bg-secondary" onClick={() => setDeleteOpen(false)}>Cancelar</Button><Button variant="destructive" onClick={() => void executeDelete("one")}>Excluir</Button></div></div>
-          ) : (
+          {deleteTarget?.installment_group_id ? (
             <div className="space-y-3"><p className="text-sm text-muted-foreground">Escolha como excluir esta transação parcelada:</p><Button variant="outline" className="w-full justify-start border-border bg-secondary" onClick={() => void executeDelete("one")}>Excluir só esta parcela</Button><Button variant="outline" className="w-full justify-start border-border bg-secondary" onClick={() => void executeDelete("remaining")}>Excluir todas as parcelas restantes</Button><Button variant="destructive" className="w-full justify-start" onClick={() => void executeDelete("all")}>Excluir todas as parcelas</Button><Button variant="ghost" className="w-full" onClick={() => setDeleteOpen(false)}>Cancelar</Button></div>
+          ) : (deleteTarget?.is_recurring || deleteTarget?.recurrence_parent_id) ? (
+            <div className="space-y-3"><p className="text-sm text-muted-foreground">Escolha como excluir esta transação recorrente:</p><Button variant="outline" className="w-full justify-start border-border bg-secondary" onClick={() => void executeDelete("one")}>Excluir só esta ocorrência</Button><Button variant="outline" className="w-full justify-start border-border bg-secondary" onClick={() => void executeDelete("remaining")}>Excluir esta e as futuras</Button><Button variant="destructive" className="w-full justify-start" onClick={() => void executeDelete("all")}>Excluir todas as ocorrências</Button><Button variant="ghost" className="w-full" onClick={() => setDeleteOpen(false)}>Cancelar</Button></div>
+          ) : (
+            <div className="space-y-4"><p className="text-sm text-muted-foreground">Tem certeza que deseja excluir esta transação?</p><div className="flex justify-end gap-2"><Button variant="outline" className="border-border bg-secondary" onClick={() => setDeleteOpen(false)}>Cancelar</Button><Button variant="destructive" onClick={() => void executeDelete("one")}>Excluir</Button></div></div>
           )}
         </DialogContent>
       </Dialog>

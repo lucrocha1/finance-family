@@ -30,7 +30,9 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useAuth } from "@/contexts/AuthContext";
+import { useFamily } from "@/contexts/FamilyContext";
 import { useTheme } from "@/contexts/ThemeContext";
+import { useEnsureRecurrencesGenerated } from "@/hooks/useEnsureRecurrencesGenerated";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
@@ -60,10 +62,13 @@ const ALL_ITEMS = [...MAIN_ITEMS, ...EXTRA_ITEMS, ...BOTTOM_ITEMS];
 
 export const AppLayout = () => {
   const { profile, user } = useAuth();
+  const { family } = useFamily();
   const { isDark, toggleTheme } = useTheme();
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const isMobile = useIsMobile();
+
+  useEnsureRecurrencesGenerated(family?.id);
 
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
