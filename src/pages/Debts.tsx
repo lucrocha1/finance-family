@@ -288,20 +288,19 @@ const DebtsPage = () => {
   };
 
   const summary = useMemo(() => {
-    const active = debts.filter((debt) => getUiStatus(debt) !== "paid_off");
+    const active = debts.filter((debt) => debt.status === "active");
     const iOwe = active.filter((debt) => debt.direction === "i_owe").reduce((sum, debt) => sum + getRemaining(debt), 0);
     const theyOwe = active.filter((debt) => debt.direction === "they_owe").reduce((sum, debt) => sum + getRemaining(debt), 0);
 
-    const upcoming = active
-      .filter((debt) => debt.due_date)
-      .sort((a, b) => {
-        const aDate = a.due_date ?? "9999-12-31";
-        const bDate = b.due_date ?? "9999-12-31";
-        const aOverdue = aDate < todayIso();
-        const bOverdue = bDate < todayIso();
-        if (aOverdue !== bOverdue) return aOverdue ? -1 : 1;
-        return aDate.localeCompare(bDate);
-      })[0] ?? null;
+    const nonOverdueUpcoming = active
+      .filter((debt) => Boolean(debt.due_date && debt.due_date >= todayIso()))
+      .sort((a, b) => (a.due_date ?? "9999-12-31").localeCompare(b.due_date ?? "9999-12-31"))[0];
+
+    const overdueUpcoming = active
+      .filter((debt) => Boolean(debt.due_date && debt.due_date < todayIso()))
+      .sort((a, b) => (b.due_date ?? "0000-01-01").localeCompare(a.due_date ?? "0000-01-01"))[0];
+
+    const upcoming = nonOverdueUpcoming ?? overdueUpcoming ?? null;
 
     return { iOwe, theyOwe, net: theyOwe - iOwe, upcoming };
   }, [debts]);
