@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Check, Pencil, Plus, Trash2 } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import { z } from "zod";
 
 import {
@@ -113,6 +114,7 @@ const getCycleWindow = (closingDay: number, baseDate = new Date()) => {
 const CardsPage = () => {
   const { family } = useFamily();
   const { user } = useAuth();
+  const navigate = useNavigate();
 
   const [loading, setLoading] = useState(true);
   const [cards, setCards] = useState<CardRow[]>([]);
@@ -267,9 +269,8 @@ const CardsPage = () => {
     setSaving(true);
     setFormError(null);
 
-    const payload = {
+    const payloadBase = {
       name: parsed.data.name,
-      last4: parsed.data.last4 || null,
       brand: parsed.data.brand,
       credit_limit: parsed.data.creditLimitCents / 100,
       closing_day: parsed.data.closingDay,
@@ -277,9 +278,21 @@ const CardsPage = () => {
       color: parsed.data.color,
     };
 
-    const result = editing
-      ? await supabase.from("cards").update(payload).eq("id", editing.id)
-      : await supabase.from("cards").insert({ ...payload, user_id: user.id, family_id: family.id });
+    const payloadWithLast4 = { ...payloadBase, last4: parsed.data.last4 || null };
+    const payloadWithLastDigits = { ...payloadBase, last_digits: parsed.data.last4 || null };
+
+    let result;
+    if (editing) {
+      result = await supabase.from("cards").update(payloadWithLast4).eq("id", editing.id);
+      if (result.error && result.error.message.toLowerCase().includes("last4")) {
+        result = await supabase.from("cards").update(payloadWithLastDigits).eq("id", editing.id);
+      }
+    } else {
+      result = await supabase.from("cards").insert({ ...payloadWithLast4, user_id: user.id, family_id: family.id });
+      if (result.error && result.error.message.toLowerCase().includes("last4")) {
+        result = await supabase.from("cards").insert({ ...payloadWithLastDigits, user_id: user.id, family_id: family.id });
+      }
+    }
 
     setSaving(false);
 
@@ -335,16 +348,16 @@ const CardsPage = () => {
         </Button>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-3">
-        <div className="rounded-xl border p-5" style={{ backgroundColor: "#12121a", borderColor: "#1e1e2e" }}>
+      <div className="flex flex-wrap gap-4">
+        <div className="min-w-[220px] flex-1 rounded-xl border p-5" style={{ backgroundColor: "#12121a", borderColor: "#1e1e2e" }}>
           <p className="text-xs font-semibold tracking-wide text-muted-foreground">LIMITE TOTAL</p>
           <p className="mt-2 text-3xl font-bold text-foreground">{ptCurrency.format(summary.totalLimit)}</p>
         </div>
-        <div className="rounded-xl border p-5" style={{ backgroundColor: "#12121a", borderColor: "#1e1e2e" }}>
+        <div className="min-w-[220px] flex-1 rounded-xl border p-5" style={{ backgroundColor: "#12121a", borderColor: "#1e1e2e" }}>
           <p className="text-xs font-semibold tracking-wide text-muted-foreground">UTILIZADO</p>
           <p className="mt-2 text-3xl font-bold text-destructive">{ptCurrency.format(summary.totalUsed)}</p>
         </div>
-        <div className="rounded-xl border p-5" style={{ backgroundColor: "#12121a", borderColor: "#1e1e2e" }}>
+        <div className="min-w-[220px] flex-1 rounded-xl border p-5" style={{ backgroundColor: "#12121a", borderColor: "#1e1e2e" }}>
           <p className="text-xs font-semibold tracking-wide text-muted-foreground">DISPONÍVEL</p>
           <p className="mt-2 text-3xl font-bold text-emerald-500">{ptCurrency.format(summary.totalAvailable)}</p>
         </div>
@@ -355,7 +368,7 @@ const CardsPage = () => {
       ) : cardsWithUsage.length === 0 ? (
         <div className="rounded-xl border border-dashed border-border bg-secondary/20 p-8 text-sm text-muted-foreground">Nenhum cartão cadastrado ainda.</div>
       ) : (
-        <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">
+        <div className="grid grid-cols-1 gap-5 md:grid-cols-2 lg:grid-cols-3">
           {cardsWithUsage.map((card) => {
             const base = card.color || getBrandDefaultColor((card.brand ?? "outro") as CardBrand);
             const end = card.color ? darkenHex(base) : getBrandGradientEnd((card.brand ?? "outro") as CardBrand);
@@ -394,7 +407,7 @@ const CardsPage = () => {
 
                 <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/35 opacity-0 transition-opacity duration-200 group-hover:opacity-100">
                   <div className="pointer-events-auto flex gap-2">
-                    <Button size="sm" className="h-9 rounded-lg px-4 text-xs font-semibold" onClick={() => toast("Detalhe da fatura entra na Fase 4B")}>Ver fatura</Button>
+                    <Button size="sm" className="h-9 rounded-lg px-4 text-xs font-semibold" onClick={() => navigate(`/cards/${card.id}`)}>Ver fatura</Button>
                     <Button size="sm" variant="outline" className="h-9 rounded-lg border-white/50 bg-transparent px-4 text-xs font-semibold text-white hover:bg-white/10" onClick={() => openEdit(card)}>
                       <Pencil className="mr-1 h-3.5 w-3.5" />
                       Editar
