@@ -40,7 +40,7 @@ type CardRow = {
 type TxExpenseRow = {
   card_id: string | null;
   amount: number;
-  date: string;
+  status: string | null;
 };
 
 const ptCurrency = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
@@ -171,24 +171,18 @@ const CardsPage = () => {
       return;
     }
 
-    const windows = normalizedCards
-      .filter((card) => Number(card.closing_day) > 0)
-      .map((card) => ({ id: card.id, ...getCycleWindow(Number(card.closing_day || 1)) }));
-
-    const minStart = windows.map((w) => w.start).sort()[0];
-    const maxEnd = windows.map((w) => w.end).sort().slice(-1)[0];
-
+    // Limite comprometido = soma de despesas no cartão ainda NÃO pagas.
+    // Parcelas pagas liberam o limite na hora; parcelas futuras
+    // (status='pending') continuam comprometendo até serem quitadas.
     const txRes = await supabase
       .from("transactions")
-      .select("card_id, amount, date")
-      .eq("family_id", family.id)
+      .select("card_id, amount, status")
       .eq("type", "expense")
       .in(
         "card_id",
         normalizedCards.map((card) => card.id),
       )
-      .gte("date", minStart)
-      .lte("date", maxEnd);
+      .neq("status", "paid");
 
     if (txRes.error) {
       toast.error("Erro ao calcular gastos dos cartões");
@@ -200,9 +194,8 @@ const CardsPage = () => {
     const totals: Record<string, number> = {};
 
     normalizedCards.forEach((card) => {
-      const cycle = getCycleWindow(Number(card.closing_day || 1));
       totals[card.id] = expenses
-        .filter((tx) => tx.card_id === card.id && tx.date >= cycle.start && tx.date <= cycle.end)
+        .filter((tx) => tx.card_id === card.id)
         .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
     });
 

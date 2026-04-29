@@ -142,6 +142,7 @@ const DashboardPage = () => {
   const [previousTransactions, setPreviousTransactions] = useState<TransactionRow[]>([]);
   const [accounts, setAccounts] = useState<AccountRow[]>([]);
   const [cards, setCards] = useState<CardRow[]>([]);
+  const [cardCommitments, setCardCommitments] = useState<Pick<TransactionRow, "card_id" | "amount" | "type">[]>([]);
   const [scheduledMonth, setScheduledMonth] = useState<ScheduledPaymentRow[]>([]);
   const [scheduledToday, setScheduledToday] = useState<ScheduledPaymentRow[]>([]);
   const [scheduledWeek, setScheduledWeek] = useState<ScheduledPaymentRow[]>([]);
@@ -164,6 +165,7 @@ const DashboardPage = () => {
       setPreviousTransactions([]);
       setAccounts([]);
       setCards([]);
+      setCardCommitments([]);
       setScheduledMonth([]);
       setScheduledToday([]);
       setScheduledWeek([]);
@@ -172,7 +174,7 @@ const DashboardPage = () => {
 
     const loadDashboard = async () => {
       setLoading(true);
-      const [txCurrent, txPrev, accountsRes, cardsRes, schedMonthRes, schedTodayRes, schedWeekRes] = await Promise.all([
+      const [txCurrent, txPrev, accountsRes, cardsRes, schedMonthRes, schedTodayRes, schedWeekRes, cardCommitRes] = await Promise.all([
         supabase
           .from("transactions")
           .select("id, family_id, user_id, card_id, category_id, amount, type, status, date, is_installment, is_recurring, categories ( id, name, icon, color )")
@@ -200,12 +202,22 @@ const DashboardPage = () => {
           .eq("family_id", family.id)
           .gte("due_date", toISODate(weekStart))
           .lte("due_date", toISODate(weekEnd)),
+        // Compromissos do cartão = todas as despesas com cartão ainda não pagas
+        // (parcelas pending de qualquer mês). É o que define "limite utilizado".
+        supabase
+          .from("transactions")
+          .select("card_id, amount, type")
+          .eq("family_id", family.id)
+          .eq("type", "expense")
+          .neq("status", "paid")
+          .not("card_id", "is", null),
       ]);
 
       setTransactions((txCurrent.data as TransactionRow[] | null) ?? []);
       setPreviousTransactions((txPrev.data as TransactionRow[] | null) ?? []);
       setAccounts((accountsRes.data as AccountRow[] | null) ?? []);
       setCards((cardsRes.data as CardRow[] | null) ?? []);
+      setCardCommitments((cardCommitRes.data as Pick<TransactionRow, "card_id" | "amount" | "type">[] | null) ?? []);
       setScheduledMonth((schedMonthRes.data as ScheduledPaymentRow[] | null) ?? []);
       setScheduledToday((schedTodayRes.data as ScheduledPaymentRow[] | null) ?? []);
       setScheduledWeek((schedWeekRes.data as ScheduledPaymentRow[] | null) ?? []);
@@ -263,8 +275,10 @@ const DashboardPage = () => {
   }, [scheduledMonth, transactions]);
 
   const expensesByCard = useMemo(() => {
+    // Same rule as Cards.tsx: committed limit = sum of unpaid card expenses.
+    // Parcels still pending continue to hold the limit; paid parcels release it.
     const totalsByCard = new Map<string, number>();
-    transactions
+    cardCommitments
       .filter((tx) => tx.type === "expense" && tx.card_id)
       .forEach((tx) => {
         if (!tx.card_id) return;
@@ -278,7 +292,7 @@ const DashboardPage = () => {
       const available = Math.max(limit - spent, 0);
       return { ...card, spent, limit, ratio, available };
     });
-  }, [cards, transactions]);
+  }, [cardCommitments, cards]);
 
   const busiestDay = useMemo(() => {
     if (!scheduledWeek.length) return null;
