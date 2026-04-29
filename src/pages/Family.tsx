@@ -37,7 +37,7 @@ const formatDate = (isoDate?: string) => {
 };
 
 const FamilyPage = () => {
-  const { family, members, currentUser, isAdmin, loading, refetch } = useFamily();
+  const { family, members, currentUser, isAdmin, loading, error, refetch } = useFamily();
 
   const [copied, setCopied] = useState(false);
   const [editingFamilyName, setEditingFamilyName] = useState(false);
@@ -124,7 +124,11 @@ const FamilyPage = () => {
       <div className="flex min-h-[calc(100vh-10rem)] items-center justify-center">
         <div className="text-center">
           <Users className="mx-auto h-16 w-16 text-[hsl(var(--placeholder-icon))]" />
-          <p className="mt-4 text-lg text-muted-foreground">Família não encontrada.</p>
+          <p className="mt-4 text-lg text-muted-foreground">{error ? "Sem acesso à família no momento." : "Família não encontrada."}</p>
+          {error && <p className="mt-2 text-sm text-destructive">{error}</p>}
+          <Button onClick={() => void refetch()} variant="outline" className="mt-4 border-border bg-secondary">
+            Tentar novamente
+          </Button>
         </div>
       </div>
     );
