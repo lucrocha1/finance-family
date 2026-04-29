@@ -62,8 +62,9 @@ export const AppLayout = () => {
 
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const isCollapsed = !isMobile && collapsed;
 
-  const desktopSidebarWidth = collapsed ? "72px" : "260px";
+  const desktopSidebarWidth = isCollapsed ? "72px" : "260px";
 
   const pageTitle = useMemo(() => {
     return ALL_ITEMS.find((item) => item.path === pathname)?.label ?? "Dashboard";
@@ -102,13 +103,13 @@ export const AppLayout = () => {
         {({ isActive }) => (
           <>
             <item.icon className={cn("h-5 w-5 shrink-0 transition-colors duration-200", isActive ? "text-primary" : "text-muted-foreground")} />
-            {!collapsed && <span className="truncate">{item.label}</span>}
+            {!isCollapsed && <span className="truncate">{item.label}</span>}
           </>
         )}
       </NavLink>
     );
 
-    if (collapsed && !isMobile) {
+    if (isCollapsed && !isMobile) {
       return (
         <Tooltip key={item.path}>
           <TooltipTrigger asChild>{content}</TooltipTrigger>
@@ -127,7 +128,7 @@ export const AppLayout = () => {
       {isMobile && mobileOpen && (
         <button
           aria-label="Fechar menu"
-          className="fixed inset-0 z-30 bg-black/50"
+          className="fixed inset-0 z-30 bg-[hsl(var(--overlay)/0.5)]"
           onClick={() => setMobileOpen(false)}
           type="button"
         />
@@ -142,7 +143,7 @@ export const AppLayout = () => {
         style={{ width: isMobile ? "260px" : desktopSidebarWidth }}
       >
         <div className="relative flex h-16 items-center px-4">
-          <p className="text-xl font-bold text-primary">{collapsed && !isMobile ? "💰" : "💰 FinanceApp"}</p>
+          <p className="text-xl font-bold text-primary">{isCollapsed ? "💰" : "💰 FinanceApp"}</p>
           {!isMobile && (
             <Button
               type="button"
@@ -150,9 +151,9 @@ export const AppLayout = () => {
               size="icon"
               onClick={() => setCollapsed((prev) => !prev)}
               className="absolute right-3 h-8 w-8 rounded-md text-muted-foreground hover:bg-[hsl(var(--sidebar-hover-bg))] hover:text-foreground"
-              aria-label={collapsed ? "Expandir sidebar" : "Recolher sidebar"}
+              aria-label={isCollapsed ? "Expandir sidebar" : "Recolher sidebar"}
             >
-              {collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
+              {isCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
             </Button>
           )}
         </div>
@@ -163,7 +164,7 @@ export const AppLayout = () => {
           <div className="mx-3 my-3 h-px bg-border" />
 
           <div className="space-y-1">
-            {!collapsed && <p className="px-4 pb-1 text-xs font-semibold uppercase tracking-normal text-[hsl(var(--section-label))]">Extras</p>}
+            {!isCollapsed && <p className="px-4 pb-1 text-xs font-semibold uppercase tracking-normal text-[hsl(var(--section-label))]">Extras</p>}
             {EXTRA_ITEMS.map(renderMenuItem)}
           </div>
 
