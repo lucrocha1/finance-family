@@ -889,6 +889,12 @@ const DebtsPage = () => {
             </DialogTitle>
           </DialogHeader>
 
+          {!editing && (
+            <div className="rounded-lg border border-info/30 bg-info/5 p-3 text-xs text-muted-foreground">
+              Use aqui para algo com <span className="font-semibold text-foreground">juros, parcelas mensais ou saldo a evoluir no tempo</span> (financiamento, empréstimo bancário, dinheiro emprestado/tomado). As parcelas serão geradas automaticamente na sua <a href="/schedule" className="font-semibold text-primary hover:underline">Agenda</a>. Para conta pontual sem juros, use <a href="/schedule" className="font-semibold text-primary hover:underline">Compromissos</a>.
+            </div>
+          )}
+
           <div className="space-y-4">
             <div className="space-y-2">
               <Label>Tipo</Label>

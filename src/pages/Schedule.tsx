@@ -289,14 +289,14 @@ const SchedulePage = () => {
         .eq("status", "pending")
         .gte("date", toISODate(monthStart))
         .lte("date", toISODate(monthEnd)),
+      // Pull every active debt (parceled debts emit one event per
+      // installment, generated client-side below from start_date +
+      // total_installments).
       supabase
         .from("debts")
-        .select("id, name, total_with_interest, original_amount, due_date, status, direction")
+        .select("id, name, total_with_interest, original_amount, due_date, status, direction, has_installments, total_installments, installments_paid, installment_amount, start_date")
         .eq("family_id", family.id)
-        .neq("status", "paid")
-        .not("due_date", "is", null)
-        .gte("due_date", toISODate(monthStart))
-        .lte("due_date", toISODate(monthEnd)),
+        .neq("status", "paid"),
       supabase.from("cards").select("id, name, closing_day, due_day").eq("family_id", family.id),
       supabase
         .from("transactions")
@@ -331,22 +331,67 @@ const SchedulePage = () => {
       source_id: String(t.id),
     }));
 
-    const debtsAsScheduled: ScheduledRow[] = ((debtsMonthRes.data ?? []) as Array<Record<string, unknown>>).map((d) => ({
-      id: `debt-${d.id}`,
-      description: `${(d.direction as string) === "they_owe" ? "Receber de" : "Pagar"}: ${(d.name as string) ?? "Dívida"}`,
-      amount: Number((d.total_with_interest as number | null) ?? d.original_amount ?? 0),
-      due_date: String(d.due_date ?? ""),
-      type: (d.direction as string) === "they_owe" ? "receivable" : "payable",
-      recurrence: "once",
-      recurrence_type: "once",
-      category_id: null,
-      status: "pending",
-      is_paid: false,
-      paid_at: null,
-      created_at: null,
-      source: "debt",
-      source_id: String(d.id),
-    }));
+    // Expand parceled debts into one event per installment (start_date
+    // + n months). Non-parceled debts get a single event at due_date.
+    const debtsAsScheduled: ScheduledRow[] = ((debtsMonthRes.data ?? []) as Array<Record<string, unknown>>).flatMap((d) => {
+      const direction = (d.direction as string) === "they_owe" ? "receivable" : "payable";
+      const verbo = direction === "receivable" ? "Receber" : "Pagar";
+      const baseLabel = (d.name as string) ?? "Dívida";
+      const hasInstallments = Boolean(d.has_installments) && Number(d.total_installments ?? 0) >= 2;
+
+      if (!hasInstallments) {
+        const dueIso = String(d.due_date ?? "");
+        if (!dueIso) return [];
+        return [{
+          id: `debt-${d.id}`,
+          description: `${verbo}: ${baseLabel}`,
+          amount: Number((d.total_with_interest as number | null) ?? d.original_amount ?? 0),
+          due_date: dueIso,
+          type: direction,
+          recurrence: "once",
+          recurrence_type: "once",
+          category_id: null,
+          status: "pending",
+          is_paid: false,
+          paid_at: null,
+          created_at: null,
+          source: "debt",
+          source_id: String(d.id),
+        }] as ScheduledRow[];
+      }
+
+      const totalInstallments = Number(d.total_installments ?? 0);
+      const installmentsPaid = Number(d.installments_paid ?? 0);
+      const installmentAmount = Number(d.installment_amount ?? 0);
+      const startIso = String(d.start_date ?? "");
+      if (!startIso) return [];
+      const start = new Date(`${startIso}T00:00:00`);
+      const out: ScheduledRow[] = [];
+      for (let i = 0; i < totalInstallments; i++) {
+        const due = new Date(start);
+        due.setMonth(due.getMonth() + i);
+        const dueIso = toISODate(due);
+        const number = i + 1;
+        const isPaidParcel = number <= installmentsPaid;
+        out.push({
+          id: `debt-${d.id}-${number}`,
+          description: `${verbo}: ${baseLabel} (${number}/${totalInstallments})`,
+          amount: installmentAmount,
+          due_date: dueIso,
+          type: direction,
+          recurrence: "monthly",
+          recurrence_type: "monthly",
+          category_id: null,
+          status: isPaidParcel ? "paid" : "pending",
+          is_paid: isPaidParcel,
+          paid_at: null,
+          created_at: null,
+          source: "debt",
+          source_id: String(d.id),
+        });
+      }
+      return out;
+    });
 
     const cardsList = ((cardsRes.data ?? []) as Array<{ id: string; name: string; closing_day: number | null; due_day: number | null }>);
     const cardTxs = ((cardTxRes.data ?? []) as Array<{ card_id: string | null; amount: number; date: string }>);
@@ -358,7 +403,10 @@ const SchedulePage = () => {
     const cardEventsOverdue = buildCardEvents(cardsList, cardTxs, new Date(todayDate.getFullYear(), todayDate.getMonth() - 1, 1), new Date(todayDate.getFullYear(), todayDate.getMonth(), todayDate.getDate() - 1));
     const cardEventsNext7 = buildCardEvents(cardsList, cardTxs, todayDate, next7DateEnd);
 
-    const monthRows = [...((monthRes.data as ScheduledRow[] | null) ?? []), ...txAsScheduled, ...debtsAsScheduled, ...cardEvents];
+    const monthStartIso = toISODate(monthStart);
+    const monthEndIso = toISODate(monthEnd);
+    const debtsInMonth = debtsAsScheduled.filter((r) => r.due_date >= monthStartIso && r.due_date <= monthEndIso);
+    const monthRows = [...((monthRes.data as ScheduledRow[] | null) ?? []), ...txAsScheduled, ...debtsInMonth, ...cardEvents];
     const dayRows = [
       ...((dayRes.data as ScheduledRow[] | null) ?? []),
       ...txAsScheduled.filter((r) => r.due_date === selectedDate),
@@ -894,6 +942,12 @@ const SchedulePage = () => {
           <DialogHeader>
             <DialogTitle>{editing ? "Editar Compromisso" : "Novo Compromisso"}</DialogTitle>
           </DialogHeader>
+
+          {!editing && (
+            <div className="rounded-lg border border-info/30 bg-info/5 p-3 text-xs text-muted-foreground">
+              Use compromisso para <span className="font-semibold text-foreground">contas recorrentes ou pontuais</span> (luz, aluguel, salário). Para algo com <span className="font-semibold text-foreground">juros ou várias parcelas</span>, prefira cadastrar em <a href="/debts" className="font-semibold text-primary hover:underline">Dívidas & Empréstimos</a> — as parcelas aparecem aqui na agenda automaticamente.
+            </div>
+          )}
 
           <div className="space-y-3">
             <div className="space-y-2">
