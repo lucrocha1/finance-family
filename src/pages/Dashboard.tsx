@@ -135,6 +135,28 @@ const getOpenInvoiceWindow = (closingDay: number, dueDay: number, today = new Da
 const formatShortDate = (date: Date) => date.toLocaleDateString("pt-BR", { day: "2-digit", month: "short" }).replace(".", "");
 const daysBetween = (a: Date, b: Date) => Math.ceil((b.getTime() - a.getTime()) / 86400000);
 
+type DonutTooltipPayload = {
+  payload?: { name?: string; value?: number; percentage?: number; color?: string };
+};
+
+const DonutTooltip = ({ active, payload }: { active?: boolean; payload?: DonutTooltipPayload[] }) => {
+  if (!active || !payload?.length) return null;
+  const item = payload[0]?.payload;
+  if (!item) return null;
+  return (
+    <div className="rounded-xl border border-border bg-popover/95 px-3 py-2 shadow-lg backdrop-blur-md">
+      <div className="mb-1 flex items-center gap-2">
+        <span className="h-2 w-2 rounded-full" style={{ backgroundColor: item.color }} />
+        <span className="text-xs font-semibold text-foreground">{item.name}</span>
+      </div>
+      <div className="flex items-baseline gap-2">
+        <span className="text-sm font-bold tabular-nums text-foreground">{ptCurrency.format(Number(item.value || 0))}</span>
+        <span className="text-xs text-muted-foreground">{(item.percentage ?? 0).toFixed(1)}%</span>
+      </div>
+    </div>
+  );
+};
+
 const DashboardPage = () => {
   const { family } = useFamily();
   const navigate = useNavigate();
@@ -505,14 +527,7 @@ const totalBankBalance = useMemo(() => accounts.reduce((sum, account) => sum + N
                   ) : (
                     <Pie data={[{ value: 1 }]} dataKey="value" innerRadius={60} outerRadius={90} stroke="none" fill="hsl(var(--border))" />
                   )}
-                  <Tooltip
-                    formatter={(value: number, _name: string, payload: { payload?: { percentage?: number } }) => [
-                      ptCurrency.format(Number(value || 0)),
-                      `${(payload.payload?.percentage ?? 0).toFixed(1)}%`,
-                    ]}
-                    contentStyle={tooltipStyle}
-                    labelStyle={{ color: chartColors.tooltipText }}
-                  />
+                  <Tooltip content={<DonutTooltip />} cursor={false} offset={16} wrapperStyle={{ outline: "none" }} />
                 </PieChart>
               </ResponsiveContainer>
               <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
@@ -566,14 +581,7 @@ const totalBankBalance = useMemo(() => accounts.reduce((sum, account) => sum + N
                   ) : (
                     <Pie data={[{ value: 1 }]} dataKey="value" innerRadius={60} outerRadius={90} stroke="none" fill="hsl(var(--border))" />
                   )}
-                  <Tooltip
-                    formatter={(value: number, _name: string, payload: { payload?: { percentage?: number } }) => [
-                      ptCurrency.format(Number(value || 0)),
-                      `${(payload.payload?.percentage ?? 0).toFixed(1)}%`,
-                    ]}
-                    contentStyle={tooltipStyle}
-                    labelStyle={{ color: chartColors.tooltipText }}
-                  />
+                  <Tooltip content={<DonutTooltip />} cursor={false} offset={16} wrapperStyle={{ outline: "none" }} />
                 </PieChart>
               </ResponsiveContainer>
               <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">

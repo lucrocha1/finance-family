@@ -102,10 +102,13 @@ const getCycleWindow = (closingDay: number, invoiceMonth: Date) => {
   return { start: toISODate(cycleStart), end: toISODate(cycleEnd) };
 };
 
-const getDueDate = (invoiceMonth: Date, dueDay: number) => {
-  const next = new Date(invoiceMonth.getFullYear(), invoiceMonth.getMonth() + 1, 1);
-  const lastDay = new Date(next.getFullYear(), next.getMonth() + 1, 0).getDate();
-  return new Date(next.getFullYear(), next.getMonth(), Math.min(dueDay, lastDay));
+const getDueDate = (invoiceMonth: Date, dueDay: number, closingDay: number) => {
+  // If due_day > closing_day, the bill is paid in the same month it closed.
+  // Otherwise the due day falls in the following month.
+  const offset = dueDay >= closingDay ? 0 : 1;
+  const target = new Date(invoiceMonth.getFullYear(), invoiceMonth.getMonth() + offset, 1);
+  const lastDay = new Date(target.getFullYear(), target.getMonth() + 1, 0).getDate();
+  return new Date(target.getFullYear(), target.getMonth(), Math.min(dueDay, lastDay));
 };
 
 const CardInvoiceDetailPage = () => {
@@ -116,6 +119,7 @@ const CardInvoiceDetailPage = () => {
   const [loading, setLoading] = useState(true);
   const [card, setCard] = useState<CardRow | null>(null);
   const [selectedInvoiceMonth, setSelectedInvoiceMonth] = useState(() => startOfMonth(new Date()));
+  const [defaultedToOpen, setDefaultedToOpen] = useState(false);
   const [categories, setCategories] = useState<CategoryRow[]>([]);
   const [transactions, setTransactions] = useState<TransactionRow[]>([]);
   const [history, setHistory] = useState<{ month: Date; total: number; status: "paid" | "open" }[]>([]);
@@ -165,7 +169,21 @@ const CardInvoiceDetailPage = () => {
     setCard(currentCard);
     setCategories((categoriesRes.data as CategoryRow[] | null) ?? []);
 
-    const cycle = getCycleWindow(Number(currentCard.closing_day || 1), selectedInvoiceMonth);
+    // On first load, default to the OPEN invoice (the cycle currently
+    // being filled). If today's day > closing_day, the open invoice
+    // closes next month — so jump selectedInvoiceMonth forward.
+    let invoiceMonth = selectedInvoiceMonth;
+    if (!defaultedToOpen) {
+      const today = new Date();
+      const closingDay = Number(currentCard.closing_day || 1);
+      if (today.getDate() > closingDay) {
+        invoiceMonth = startOfMonth(new Date(today.getFullYear(), today.getMonth() + 1, 1));
+        setSelectedInvoiceMonth(invoiceMonth);
+      }
+      setDefaultedToOpen(true);
+    }
+
+    const cycle = getCycleWindow(Number(currentCard.closing_day || 1), invoiceMonth);
     const txRes = await supabase
       .from("transactions")
       .select("id, description, amount, date, status, type, category_id, notes, categories(id, name, color)")
@@ -218,7 +236,10 @@ const CardInvoiceDetailPage = () => {
   }, [loadData]);
 
   const invoiceTotal = useMemo(() => transactions.reduce((sum, tx) => sum + Number(tx.amount || 0), 0), [transactions]);
-  const dueDate = useMemo(() => getDueDate(selectedInvoiceMonth, Number(card?.due_day || 1)), [card?.due_day, selectedInvoiceMonth]);
+  const dueDate = useMemo(
+    () => getDueDate(selectedInvoiceMonth, Number(card?.due_day || 1), Number(card?.closing_day || 1)),
+    [card?.due_day, card?.closing_day, selectedInvoiceMonth],
+  );
 
   const invoiceStatus = useMemo(() => {
     if (!transactions.length) return { label: "Aberta", className: "text-yellow-400" };
