@@ -64,7 +64,15 @@ type TransactionRow = {
 };
 
 type AccountRow = { id: string; family_id: string; balance: number };
-type CardRow = { id: string; family_id: string; name: string; brand: string | null; credit_limit: number | null };
+type CardRow = {
+  id: string;
+  family_id: string;
+  name: string;
+  brand: string | null;
+  credit_limit: number | null;
+  closing_day: number | null;
+  due_day: number | null;
+};
 type ScheduledPaymentRow = {
   id: string;
   family_id: string;
@@ -106,6 +114,27 @@ const formatCompactBRL = (value: number) => {
   return ptCurrency.format(value);
 };
 
+// Computes the open invoice cycle of a card based on closing/due day.
+const getOpenInvoiceWindow = (closingDay: number, dueDay: number, today = new Date()) => {
+  const year = today.getFullYear();
+  const month = today.getMonth();
+  const day = today.getDate();
+  const clampDay = (y: number, m: number, d: number) => {
+    const lastDay = new Date(y, m + 1, 0).getDate();
+    return new Date(y, m, Math.min(d, lastDay));
+  };
+  const nextClosing = day > closingDay ? clampDay(year, month + 1, closingDay) : clampDay(year, month, closingDay);
+  const prevClosing = clampDay(nextClosing.getFullYear(), nextClosing.getMonth() - 1, closingDay);
+  const invoiceStart = new Date(prevClosing);
+  invoiceStart.setDate(invoiceStart.getDate() + 1);
+  const dueOffset = dueDay >= closingDay ? 0 : 1;
+  const dueDate = clampDay(nextClosing.getFullYear(), nextClosing.getMonth() + dueOffset, dueDay);
+  return { invoiceStart, invoiceEnd: nextClosing, dueDate };
+};
+
+const formatShortDate = (date: Date) => date.toLocaleDateString("pt-BR", { day: "2-digit", month: "short" }).replace(".", "");
+const daysBetween = (a: Date, b: Date) => Math.ceil((b.getTime() - a.getTime()) / 86400000);
+
 const DashboardPage = () => {
   const { family } = useFamily();
   const navigate = useNavigate();
@@ -128,6 +157,7 @@ const DashboardPage = () => {
   const [accounts, setAccounts] = useState<AccountRow[]>([]);
   const [cards, setCards] = useState<CardRow[]>([]);
   const [cardCommitments, setCardCommitments] = useState<Pick<TransactionRow, "card_id" | "amount" | "type">[]>([]);
+  const [cardTransactions, setCardTransactions] = useState<Pick<TransactionRow, "card_id" | "amount" | "date" | "status">[]>([]);
   const [scheduledMonth, setScheduledMonth] = useState<ScheduledPaymentRow[]>([]);
   const [scheduledWeek, setScheduledWeek] = useState<ScheduledPaymentRow[]>([]);
 
@@ -149,6 +179,7 @@ const DashboardPage = () => {
       setAccounts([]);
       setCards([]);
       setCardCommitments([]);
+      setCardTransactions([]);
       setScheduledMonth([]);
       setScheduledWeek([]);
       return;
@@ -156,7 +187,7 @@ const DashboardPage = () => {
 
     const loadDashboard = async () => {
       setLoading(true);
-      const [txCurrent, txPrev, accountsRes, cardsRes, schedMonthRes, schedWeekRes, cardCommitRes] = await Promise.all([
+      const [txCurrent, txPrev, accountsRes, cardsRes, schedMonthRes, schedWeekRes, cardCommitRes, cardTxRes] = await Promise.all([
         supabase
           .from("transactions")
           .select("id, family_id, user_id, card_id, category_id, amount, type, status, date, is_installment, is_recurring, categories ( id, name, icon, color )")
@@ -170,7 +201,7 @@ const DashboardPage = () => {
           .gte("date", toISODate(prevMonthStart))
           .lte("date", toISODate(prevMonthEnd)),
         supabase.from("accounts").select("id, family_id, balance").eq("family_id", family.id),
-        supabase.from("cards").select("id, family_id, name, brand, credit_limit").eq("family_id", family.id),
+        supabase.from("cards").select("id, family_id, name, brand, credit_limit, closing_day, due_day").eq("family_id", family.id),
         supabase
           .from("scheduled_payments")
           .select("id, family_id, due_date, amount, type, is_paid")
@@ -192,6 +223,16 @@ const DashboardPage = () => {
           .eq("type", "expense")
           .neq("status", "paid")
           .not("card_id", "is", null),
+        // Todas as despesas no cartão num range amplo (-60d a +90d) para
+        // calcular ciclos de fatura abertos / próximos.
+        supabase
+          .from("transactions")
+          .select("card_id, amount, date, status")
+          .eq("family_id", family.id)
+          .eq("type", "expense")
+          .not("card_id", "is", null)
+          .gte("date", toISODate(new Date(Date.now() - 60 * 86400000)))
+          .lte("date", toISODate(new Date(Date.now() + 90 * 86400000))),
       ]);
 
       setTransactions((txCurrent.data as TransactionRow[] | null) ?? []);
@@ -199,6 +240,7 @@ const DashboardPage = () => {
       setAccounts((accountsRes.data as AccountRow[] | null) ?? []);
       setCards((cardsRes.data as CardRow[] | null) ?? []);
       setCardCommitments((cardCommitRes.data as Pick<TransactionRow, "card_id" | "amount" | "type">[] | null) ?? []);
+      setCardTransactions((cardTxRes.data as Pick<TransactionRow, "card_id" | "amount" | "date" | "status">[] | null) ?? []);
       setScheduledMonth((schedMonthRes.data as ScheduledPaymentRow[] | null) ?? []);
       setScheduledWeek((schedWeekRes.data as ScheduledPaymentRow[] | null) ?? []);
       setLoading(false);
@@ -257,6 +299,37 @@ const totalBankBalance = useMemo(() => accounts.reduce((sum, account) => sum + N
       return { ...card, spent, limit, ratio, available };
     });
   }, [cardCommitments, cards]);
+
+  // Faturas abertas (próxima a vencer) por cartão.
+  const openInvoices = useMemo(() => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return cards
+      .filter((card) => Number(card.closing_day) > 0 && Number(card.due_day) > 0)
+      .map((card) => {
+        const window = getOpenInvoiceWindow(Number(card.closing_day), Number(card.due_day), today);
+        const startIso = toISODate(window.invoiceStart);
+        const endIso = toISODate(window.invoiceEnd);
+        const total = cardTransactions
+          .filter((tx) => tx.card_id === card.id && tx.date >= startIso && tx.date <= endIso)
+          .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+        const daysToClose = daysBetween(today, window.invoiceEnd);
+        const daysToDue = daysBetween(today, window.dueDate);
+        return {
+          id: card.id,
+          name: card.name,
+          brand: card.brand,
+          total,
+          invoiceStart: window.invoiceStart,
+          invoiceEnd: window.invoiceEnd,
+          dueDate: window.dueDate,
+          daysToClose,
+          daysToDue,
+        };
+      })
+      .filter((row) => row.total > 0)
+      .sort((a, b) => a.dueDate.getTime() - b.dueDate.getTime());
+  }, [cardTransactions, cards]);
 
   const busiestDay = useMemo(() => {
     if (!scheduledWeek.length) return null;
@@ -556,6 +629,52 @@ const totalBankBalance = useMemo(() => accounts.reduce((sum, account) => sum + N
                     <p className="text-xs text-muted-foreground">de {ptCurrency.format(card.limit)}</p>
                     <div className="h-2 w-full rounded-full bg-secondary"><div className={cn("h-2 rounded-full transition-all", usageColor)} style={{ width: `${card.ratio}%` }} /></div>
                     <p className="text-xs text-muted-foreground">Disponível: {ptCurrency.format(card.available)} ({Math.max(100 - card.ratio, 0).toFixed(0)}%)</p>
+                  </div>
+                );
+              })
+            )}
+          </CardContent>
+        </Card>
+
+        <Card className="rounded-xl border-border bg-card">
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-lg font-semibold">Próximas Faturas</CardTitle>
+              <Link to="/cards" className="text-sm font-medium text-primary hover:opacity-80">Ver cartões →</Link>
+            </div>
+            <CardDescription className="text-xs text-muted-foreground">Compras feitas após o fechamento entram na fatura seguinte</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {openInvoices.length === 0 ? (
+              <div className="rounded-lg border border-dashed border-border bg-secondary/20 p-4 text-sm text-muted-foreground">
+                Nenhuma fatura aberta com lançamentos.
+              </div>
+            ) : (
+              openInvoices.map((inv) => {
+                const urgent = inv.daysToDue <= 7;
+                return (
+                  <div key={inv.id} className="space-y-2 rounded-lg border border-border bg-secondary/20 p-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="flex items-center gap-2 text-sm font-semibold">
+                        <CreditCard className="h-4 w-4 text-muted-foreground" />
+                        {inv.name} {inv.brand ? `· ${inv.brand}` : ""}
+                      </p>
+                      <p className="text-base font-bold tabular-nums">{ptCurrency.format(inv.total)}</p>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 text-xs text-muted-foreground">
+                      <div>
+                        <p className="uppercase tracking-wide">Fecha</p>
+                        <p className="font-semibold text-foreground">
+                          {formatShortDate(inv.invoiceEnd)} <span className="font-normal text-muted-foreground">({inv.daysToClose === 0 ? "hoje" : `em ${inv.daysToClose}d`})</span>
+                        </p>
+                      </div>
+                      <div>
+                        <p className="uppercase tracking-wide">Vence</p>
+                        <p className={cn("font-semibold", urgent ? "text-warning" : "text-foreground")}>
+                          {formatShortDate(inv.dueDate)} <span className="font-normal text-muted-foreground">({inv.daysToDue === 0 ? "hoje" : `em ${inv.daysToDue}d`})</span>
+                        </p>
+                      </div>
+                    </div>
                   </div>
                 );
               })
