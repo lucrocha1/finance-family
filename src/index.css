@@ -86,12 +86,12 @@
     --gradient-accent: linear-gradient(135deg, hsl(160 84% 39%), hsl(160 84% 32%));
 
     /* Glassmorphism */
-    --glass-bg: 255 255 255 / 0.55;
-    --glass-bg-strong: 255 255 255 / 0.75;
-    --glass-border: 220 220 220 / 0.4;
-    --glass-blur: 20px;
-    --glow-1: 160 84% 50%;            /* emerald glow */
-    --glow-2: 168 64% 30%;            /* teal glow */
+    --glass-bg: 255 255 255 / 0.5;
+    --glass-bg-strong: 255 255 255 / 0.72;
+    --glass-border: 0 0 0 / 0.06;
+    --glass-blur: 24px;
+    --glow-1: 160 84% 55%;            /* emerald glow */
+    --glow-2: 168 64% 40%;            /* teal glow */
   }
 
   .dark {
@@ -159,13 +159,13 @@
     --shadow-card-hover: 0 4px 12px rgba(0, 0, 0, 0.4);
     --gradient-accent: linear-gradient(135deg, hsl(160 84% 39%), hsl(158 64% 52%));
 
-    /* Glassmorphism (dark) */
-    --glass-bg: 26 29 39 / 0.55;
-    --glass-bg-strong: 26 29 39 / 0.78;
-    --glass-border: 255 255 255 / 0.08;
-    --glass-blur: 22px;
-    --glow-1: 160 84% 35%;
-    --glow-2: 168 60% 18%;
+    /* Glassmorphism (dark) — light tint over dark gradient body */
+    --glass-bg: 255 255 255 / 0.04;
+    --glass-bg-strong: 255 255 255 / 0.07;
+    --glass-border: 255 255 255 / 0.10;
+    --glass-blur: 24px;
+    --glow-1: 160 84% 40%;
+    --glow-2: 168 60% 28%;
   }
 }
 
@@ -184,9 +184,9 @@
   body {
     background-color: hsl(var(--background));
     background-image:
-      radial-gradient(circle at 12% 8%, hsl(var(--glow-1) / 0.18), transparent 45%),
-      radial-gradient(circle at 88% 92%, hsl(var(--glow-2) / 0.22), transparent 50%),
-      radial-gradient(circle at 50% 50%, hsl(var(--glow-1) / 0.06), transparent 70%);
+      radial-gradient(60vw 60vh at 8% 0%, hsl(var(--glow-1) / 0.35), transparent 60%),
+      radial-gradient(50vw 70vh at 100% 100%, hsl(var(--glow-2) / 0.40), transparent 55%),
+      radial-gradient(70vw 70vh at 50% 50%, hsl(var(--glow-1) / 0.10), transparent 70%);
     background-attachment: fixed;
     min-height: 100vh;
   }

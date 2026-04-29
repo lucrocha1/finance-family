@@ -143,7 +143,7 @@ export const AppLayout = () => {
   };
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen">
       {isMobile && mobileOpen && (
         <button
           aria-label="Fechar menu"
