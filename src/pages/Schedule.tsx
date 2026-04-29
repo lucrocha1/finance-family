@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   ArrowDownCircle,
   ArrowLeft,
@@ -56,6 +57,8 @@ type ScheduledRow = {
   paid_at: string | null;
   categories?: CategoryRow | CategoryRow[] | null;
   created_at: string | null;
+  source?: "scheduled" | "transaction" | "debt";
+  source_id?: string;
 };
 
 const ptCurrency = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
@@ -117,6 +120,7 @@ const isOverdue = (row: ScheduledRow) => !isPaid(row) && row.due_date < todayIso
 
 const SchedulePage = () => {
   const { family } = useFamily();
+  const navigate = useNavigate();
   const { user } = useAuth();
 
   const [loading, setLoading] = useState(true);
@@ -161,7 +165,7 @@ const SchedulePage = () => {
     const monthEnd = endOfMonth(viewMonth);
     const nextWeek = addDays(todayIso(), 7);
 
-    const [monthRes, dayRes, overdueRes, next7Res, categoriesRes] = await Promise.all([
+    const [monthRes, dayRes, overdueRes, next7Res, categoriesRes, txMonthRes, debtsMonthRes] = await Promise.all([
       supabase
         .from("scheduled_payments")
         .select("*, categories(id, name, color, type)")
@@ -187,6 +191,21 @@ const SchedulePage = () => {
         .gte("due_date", todayIso())
         .lte("due_date", nextWeek),
       supabase.from("categories").select("id, name, color, type").eq("family_id", family.id).order("name", { ascending: true }),
+      supabase
+        .from("transactions")
+        .select("id, description, amount, date, type, status, category_id")
+        .eq("family_id", family.id)
+        .eq("status", "pending")
+        .gte("date", toISODate(monthStart))
+        .lte("date", toISODate(monthEnd)),
+      supabase
+        .from("debts")
+        .select("id, name, total_with_interest, original_amount, due_date, status, direction")
+        .eq("family_id", family.id)
+        .neq("status", "paid")
+        .not("due_date", "is", null)
+        .gte("due_date", toISODate(monthStart))
+        .lte("due_date", toISODate(monthEnd)),
     ]);
 
     if (monthRes.error || dayRes.error || overdueRes.error || next7Res.error || categoriesRes.error) {
@@ -195,10 +214,61 @@ const SchedulePage = () => {
       return;
     }
 
-    setMonthRows((monthRes.data as ScheduledRow[] | null) ?? []);
-    setDayRows((dayRes.data as ScheduledRow[] | null) ?? []);
-    setOverdueRows((overdueRes.data as ScheduledRow[] | null) ?? []);
-    setNext7Rows((next7Res.data as ScheduledRow[] | null) ?? []);
+    const txAsScheduled: ScheduledRow[] = ((txMonthRes.data ?? []) as Array<Record<string, unknown>>).map((t) => ({
+      id: `tx-${t.id}`,
+      description: (t.description as string) ?? "Transação pendente",
+      amount: Number(t.amount ?? 0),
+      due_date: String(t.date ?? ""),
+      type: (t.type as string) === "income" ? "receivable" : "payable",
+      recurrence: "once",
+      recurrence_type: "once",
+      category_id: (t.category_id as string | null) ?? null,
+      status: "pending",
+      is_paid: false,
+      paid_at: null,
+      created_at: null,
+      source: "transaction",
+      source_id: String(t.id),
+    }));
+
+    const debtsAsScheduled: ScheduledRow[] = ((debtsMonthRes.data ?? []) as Array<Record<string, unknown>>).map((d) => ({
+      id: `debt-${d.id}`,
+      description: `${(d.direction as string) === "they_owe" ? "Receber de" : "Pagar"}: ${(d.name as string) ?? "Dívida"}`,
+      amount: Number((d.total_with_interest as number | null) ?? d.original_amount ?? 0),
+      due_date: String(d.due_date ?? ""),
+      type: (d.direction as string) === "they_owe" ? "receivable" : "payable",
+      recurrence: "once",
+      recurrence_type: "once",
+      category_id: null,
+      status: "pending",
+      is_paid: false,
+      paid_at: null,
+      created_at: null,
+      source: "debt",
+      source_id: String(d.id),
+    }));
+
+    const monthRows = [...((monthRes.data as ScheduledRow[] | null) ?? []), ...txAsScheduled, ...debtsAsScheduled];
+    const dayRows = [
+      ...((dayRes.data as ScheduledRow[] | null) ?? []),
+      ...txAsScheduled.filter((r) => r.due_date === selectedDate),
+      ...debtsAsScheduled.filter((r) => r.due_date === selectedDate),
+    ];
+    const overdueRows = [
+      ...((overdueRes.data as ScheduledRow[] | null) ?? []),
+      ...txAsScheduled.filter((r) => r.due_date < todayIso()),
+      ...debtsAsScheduled.filter((r) => r.due_date < todayIso()),
+    ];
+    const next7Rows = [
+      ...((next7Res.data as ScheduledRow[] | null) ?? []),
+      ...txAsScheduled.filter((r) => r.due_date >= todayIso() && r.due_date <= nextWeek),
+      ...debtsAsScheduled.filter((r) => r.due_date >= todayIso() && r.due_date <= nextWeek),
+    ];
+
+    setMonthRows(monthRows);
+    setDayRows(dayRows);
+    setOverdueRows(overdueRows);
+    setNext7Rows(next7Rows);
     setCategories((categoriesRes.data as CategoryRow[] | null) ?? []);
     setLoading(false);
   }, [family?.id, selectedDate, viewMonth]);
@@ -280,6 +350,14 @@ const SchedulePage = () => {
   };
 
   const openEdit = (row: ScheduledRow) => {
+    if (row.source === "transaction") {
+      navigate("/transactions");
+      return;
+    }
+    if (row.source === "debt") {
+      navigate(`/debts/${row.source_id}`);
+      return;
+    }
     setEditing(row);
     setType(normalizeType(row.type));
     setDescription(row.description || "");
@@ -415,6 +493,19 @@ const SchedulePage = () => {
   };
 
   const togglePaid = async (row: ScheduledRow) => {
+    if (row.source === "transaction" && row.source_id) {
+      const { error } = await supabase.from("transactions").update({ status: "paid" }).eq("id", row.source_id);
+      if (error) toast.error("Não foi possível marcar como paga");
+      else {
+        toast.success("Transação marcada como paga");
+        await loadData();
+      }
+      return;
+    }
+    if (row.source === "debt") {
+      navigate(`/debts/${row.source_id}`);
+      return;
+    }
     const currentlyPaid = isPaid(row);
 
     const updateRes = await updatePaidState(row.id, !currentlyPaid);

@@ -57,6 +57,7 @@ type DebtRow = {
   counterpart_member_id: string | null;
   original_amount: number;
   total_with_interest: number | null;
+  iof_amount: number | null;
   amount_paid: number;
   has_interest: boolean;
   interest_rate: number | null;
@@ -193,6 +194,7 @@ const DebtsPage = () => {
   const [counterpartName, setCounterpartName] = useState("");
   const [counterpartMemberId, setCounterpartMemberId] = useState<string>("");
   const [originalAmountDigits, setOriginalAmountDigits] = useState("");
+  const [iofDigits, setIofDigits] = useState("");
   const [hasInterest, setHasInterest] = useState(false);
   const [interestRate, setInterestRate] = useState("1.99");
   const [interestType, setInterestType] = useState<InterestType>("monthly");
@@ -236,6 +238,7 @@ const DebtsPage = () => {
       counterpart_member_id: (row.counterpart_member_id as string | null) ?? null,
       original_amount: Number(row.original_amount ?? 0),
       total_with_interest: row.total_with_interest === null || row.total_with_interest === undefined ? null : Number(row.total_with_interest),
+      iof_amount: row.iof_amount === null || row.iof_amount === undefined ? null : Number(row.iof_amount),
       amount_paid: Number(row.amount_paid ?? 0),
       has_interest: Boolean(row.has_interest),
       interest_rate: row.interest_rate === null || row.interest_rate === undefined ? null : Number(row.interest_rate),
@@ -334,20 +337,42 @@ const DebtsPage = () => {
   const installmentsCount = Number(totalInstallments || "0");
   const monthlyRate = Number(interestRate.replace(",", ".") || "0");
 
-  const totalWithInterestPreview = useMemo(() => {
-    const base = originalAmount;
-    if (type !== "loan" || !hasInterest || monthlyRate <= 0) return base;
+  const iofAmount = digitsToValue(iofDigits);
 
+  const daysBetween = useMemo(() => {
+    if (!startDate || !dueDate) return 0;
+    const a = new Date(`${startDate}T00:00:00`);
+    const b = new Date(`${dueDate}T00:00:00`);
+    return Math.max(0, Math.round((b.getTime() - a.getTime()) / 86_400_000));
+  }, [startDate, dueDate]);
+
+  const interestPreview = useMemo(() => {
+    if (type !== "loan" || !hasInterest || monthlyRate <= 0) return 0;
+    const base = originalAmount;
+
+    // Installment loans: monthly compounding (Tabela Price simplified)
+    if (hasInstallments && installmentsCount >= 2) {
+      if (interestType === "monthly") return base * Math.pow(1 + monthlyRate / 100, installmentsCount) - base;
+      if (interestType === "yearly") return base * Math.pow(1 + monthlyRate / 100, installmentsCount / 12) - base;
+      return base * (monthlyRate / 100);
+    }
+
+    // Single payment: pro-rata by actual days
     if (interestType === "monthly") {
-      const months = hasInstallments && installmentsCount > 0 ? installmentsCount : 1;
-      return base * Math.pow(1 + monthlyRate / 100, months);
+      const dailyRate = monthlyRate / 100 / 30;
+      return base * dailyRate * daysBetween;
     }
     if (interestType === "yearly") {
-      const months = hasInstallments && installmentsCount > 0 ? installmentsCount : 1;
-      return base * Math.pow(1 + monthlyRate / 100, months / 12);
+      const dailyRate = monthlyRate / 100 / 365;
+      return base * dailyRate * daysBetween;
     }
-    return base * (1 + monthlyRate / 100);
-  }, [hasInstallments, hasInterest, installmentsCount, interestType, monthlyRate, originalAmount, type]);
+    return base * (monthlyRate / 100);
+  }, [daysBetween, hasInstallments, hasInterest, installmentsCount, interestType, monthlyRate, originalAmount, type]);
+
+  const totalWithInterestPreview = useMemo(
+    () => originalAmount + interestPreview + iofAmount,
+    [interestPreview, iofAmount, originalAmount],
+  );
 
   const installmentAmountPreview = useMemo(() => {
     if (type !== "loan" || !hasInstallments || installmentsCount < 2) return 0;
@@ -369,6 +394,7 @@ const DebtsPage = () => {
     setCounterpartName("");
     setCounterpartMemberId("");
     setOriginalAmountDigits("");
+    setIofDigits("");
     setHasInterest(false);
     setInterestRate("1.99");
     setInterestType("monthly");
@@ -395,6 +421,7 @@ const DebtsPage = () => {
     setCounterpartName(debt.counterpart_name ?? "");
     setCounterpartMemberId(debt.counterpart_member_id ?? "");
     setOriginalAmountDigits(toMoneyDigits(debt.original_amount));
+    setIofDigits(debt.iof_amount ? toMoneyDigits(debt.iof_amount) : "");
     setHasInterest(Boolean(debt.has_interest));
     setInterestRate(debt.interest_rate ? String(debt.interest_rate).replace(".", ",") : "1,99");
     setInterestType((debt.interest_type ?? "monthly") as InterestType);
@@ -453,6 +480,7 @@ const DebtsPage = () => {
       counterpart_member_id: parsed.data.counterpartType === "family_member" ? parsed.data.counterpartMemberId || null : null,
       original_amount: parsed.data.originalAmountCents / 100,
       total_with_interest: totalWithInterest,
+      iof_amount: parsed.data.type === "loan" ? iofAmount : 0,
       amount_paid: editing ? editing.amount_paid : 0,
       has_interest: parsed.data.type === "loan" ? parsed.data.hasInterest : false,
       interest_rate: parsed.data.type === "loan" && parsed.data.hasInterest ? parsed.data.interestRate : null,
@@ -973,8 +1001,28 @@ const DebtsPage = () => {
                   </div>
                 )}
 
-                {hasInterest && (
-                  <p className="text-sm text-muted-foreground">Valor total com juros: <span className="font-semibold text-foreground">{ptCurrency.format(totalWithInterestPreview)}</span></p>
+                <div className="space-y-2">
+                  <Label>IOF (opcional)</Label>
+                  <Input
+                    inputMode="numeric"
+                    placeholder="R$ 0,00"
+                    value={iofDigits ? ptCurrency.format(digitsToValue(iofDigits)) : ""}
+                    onChange={(event) => setIofDigits(event.target.value.replace(/\D/g, ""))}
+                  />
+                </div>
+
+                {(hasInterest || iofAmount > 0) && (
+                  <div className="space-y-1 rounded-lg border border-border bg-secondary/30 p-3 text-sm">
+                    <p className="text-muted-foreground">Principal: <span className="font-semibold text-foreground">{ptCurrency.format(originalAmount)}</span></p>
+                    {hasInterest && interestPreview > 0 && (
+                      <p className="text-muted-foreground">
+                        Juros: <span className="font-semibold text-foreground">{ptCurrency.format(interestPreview)}</span>
+                        {!hasInstallments && <span className="text-xs"> ({daysBetween} dia{daysBetween === 1 ? "" : "s"})</span>}
+                      </p>
+                    )}
+                    {iofAmount > 0 && <p className="text-muted-foreground">IOF: <span className="font-semibold text-foreground">{ptCurrency.format(iofAmount)}</span></p>}
+                    <p className="border-t border-border pt-1 text-foreground">Total: <span className="font-bold">{ptCurrency.format(totalWithInterestPreview)}</span></p>
+                  </div>
                 )}
 
                 <div className="space-y-2">
