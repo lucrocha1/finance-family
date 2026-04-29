@@ -100,6 +100,9 @@ const buildCardEvents = (
         .filter((tx) => tx.card_id === card.id && tx.date >= cycleStartIso && tx.date <= cycleEndIso)
         .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
 
+      // Skip cycles with no purchases — no point showing a R$ 0,00 invoice.
+      if (total <= 0) return;
+
       const closingIso = toISODate(closingDate);
       const dueIso = toISODate(dueDate);
 
