@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ArrowLeft, ChevronLeft, ChevronRight, CreditCard, Loader2 } from "lucide-react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
+import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 import { z } from "zod";
 
 import { Button } from "@/components/ui/button";
@@ -364,7 +364,7 @@ const CardInvoiceDetailPage = () => {
                 {donutData.length ? (
                   <Pie data={donutData} dataKey="value" nameKey="name" innerRadius={52} outerRadius={84} paddingAngle={2} stroke="none">
                     {donutData.map((entry) => (
-                      <cell key={`${entry.name}-${entry.color}`} fill={entry.color} />
+                      <Cell key={`${entry.name}-${entry.color}`} fill={entry.color} />
                     ))}
                   </Pie>
                 ) : (
