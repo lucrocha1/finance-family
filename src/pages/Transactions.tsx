@@ -623,9 +623,34 @@ const TransactionsPage = () => {
         <DialogContent className="max-h-[90vh] max-w-[520px] overflow-y-auto rounded-2xl border-border bg-card p-6 shadow-2xl">
           <DialogHeader><DialogTitle className="text-xl font-bold text-foreground">{editing ? "Editar Transação" : "Nova Transação"}</DialogTitle></DialogHeader>
           <div className="space-y-4">
-            <div className="grid grid-cols-3 gap-2">
-              {[{ key: "income", label: "Receita", icon: TrendingUp, active: "border-success bg-success/15 text-success", inactive: "border-success/60 text-success/80" }, { key: "expense", label: "Despesa", icon: TrendingDown, active: "border-destructive bg-destructive/15 text-destructive", inactive: "border-destructive/60 text-destructive/80" }, { key: "transfer", label: "Transferência", icon: ArrowLeftRight, active: "border-info bg-info/15 text-info", inactive: "border-info/60 text-info/80" }].map((item) => (<button key={item.key} type="button" disabled={Boolean(editing)} onClick={() => setFormType(item.key as "income" | "expense" | "transfer")} className={cn("h-10 rounded-lg border text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60", formType === item.key ? item.active : item.inactive)}><span className="inline-flex items-center gap-1"><item.icon className="h-4 w-4" />{item.label}</span></button>))}
-            </div>
+            {(() => {
+              const showTransfer = accounts.length >= 2 || (editing && editing.type === "transfer");
+              const types = [
+                { key: "income", label: "Receita", icon: TrendingUp, active: "border-success bg-success/15 text-success", inactive: "border-success/60 text-success/80" },
+                { key: "expense", label: "Despesa", icon: TrendingDown, active: "border-destructive bg-destructive/15 text-destructive", inactive: "border-destructive/60 text-destructive/80" },
+                ...(showTransfer
+                  ? [{ key: "transfer", label: "Transferência", icon: ArrowLeftRight, active: "border-info bg-info/15 text-info", inactive: "border-info/60 text-info/80" }]
+                  : []),
+              ];
+              return (
+                <div className={cn("grid gap-2", showTransfer ? "grid-cols-3" : "grid-cols-2")}>
+                  {types.map((item) => (
+                    <button
+                      key={item.key}
+                      type="button"
+                      disabled={Boolean(editing)}
+                      onClick={() => setFormType(item.key as "income" | "expense" | "transfer")}
+                      className={cn("h-10 rounded-lg border text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60", formType === item.key ? item.active : item.inactive)}
+                    >
+                      <span className="inline-flex items-center gap-1">
+                        <item.icon className="h-4 w-4" />
+                        {item.label}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              );
+            })()}
 
             {editing?.is_installment && editing.installment_current && editing.installment_total && (
               <div className="space-y-2 rounded-lg border border-border bg-secondary/40 p-3"><p className="text-sm text-foreground">Parcela {editing.installment_current} de {editing.installment_total}</p><div className="flex items-center justify-between"><Label className="text-sm text-foreground">Editar todas as parcelas?</Label><Switch checked={editAllInstallments} onCheckedChange={setEditAllInstallments} /></div></div>
