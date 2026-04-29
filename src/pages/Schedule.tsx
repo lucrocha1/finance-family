@@ -120,7 +120,7 @@ const SchedulePage = () => {
   const { user } = useAuth();
 
   const [loading, setLoading] = useState(true);
-  const [viewMonth, setViewMonth] = useState(() => startOfMonth(today));
+  const [viewMonth, setViewMonth] = useState(() => startOfMonth(new Date()));
   const [selectedDate, setSelectedDate] = useState(todayIso());
 
   const [monthRows, setMonthRows] = useState<ScheduledRow[]>([]);
