@@ -90,8 +90,17 @@ export const FamilyProvider = ({ children }: FamilyProviderProps) => {
         .eq("family_id", profileData.family_id),
     ]);
 
+    const normalizedMembers: FamilyMember[] = (membersData ?? []).map((member) => ({
+      id: member.id,
+      user_id: member.user_id,
+      family_id: member.family_id,
+      role: member.role,
+      created_at: member.created_at,
+      profiles: Array.isArray(member.profiles) ? (member.profiles[0] ?? null) : (member.profiles ?? null),
+    }));
+
     setFamily(familyData ?? null);
-    setMembers((membersData as FamilyMember[] | null) ?? []);
+    setMembers(normalizedMembers);
     setLoading(false);
   }, [user]);
 
