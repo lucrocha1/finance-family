@@ -384,13 +384,24 @@ const DashboardPage = () => {
 
   return (
     <div className="space-y-6">
-      <div className="mx-auto flex w-full max-w-sm items-center justify-between rounded-xl border border-border bg-card px-2 py-2">
-        <Button variant="ghost" size="icon" className="h-9 w-9" onClick={() => setSelectedMonth((prev) => new Date(prev.getFullYear(), prev.getMonth() - 1, 1))} aria-label="◀ Mês anterior">
-          <ChevronLeft className="h-4 w-4" />
-        </Button>
-        <p className="min-w-[190px] text-center text-base font-bold text-foreground">{capitalize(formatMonthYear(selectedMonth))}</p>
-        <Button variant="ghost" size="icon" className="h-9 w-9" onClick={() => setSelectedMonth((prev) => new Date(prev.getFullYear(), prev.getMonth() + 1, 1))} aria-label="Próximo mês ▶">
-          <ChevronRight className="h-4 w-4" />
+      <div className="mx-auto flex w-full max-w-2xl flex-wrap items-center justify-center gap-2">
+        <div className="flex items-center justify-between rounded-xl border border-border bg-card px-2 py-2">
+          <Button variant="ghost" size="icon" className="h-9 w-9" onClick={() => setSelectedMonth((prev) => new Date(prev.getFullYear(), prev.getMonth() - 1, 1))} aria-label="◀ Mês anterior">
+            <ChevronLeft className="h-4 w-4" />
+          </Button>
+          <p className="min-w-[190px] text-center text-base font-bold text-foreground">{capitalize(formatMonthYear(selectedMonth))}</p>
+          <Button variant="ghost" size="icon" className="h-9 w-9" onClick={() => setSelectedMonth((prev) => new Date(prev.getFullYear(), prev.getMonth() + 1, 1))} aria-label="Próximo mês ▶">
+            <ChevronRight className="h-4 w-4" />
+          </Button>
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-9 rounded-lg border-border bg-card text-xs font-medium"
+          onClick={() => setSelectedMonth(startOfMonth(new Date()))}
+          disabled={selectedMonth.getFullYear() === new Date().getFullYear() && selectedMonth.getMonth() === new Date().getMonth()}
+        >
+          Mês atual
         </Button>
       </div>
 
