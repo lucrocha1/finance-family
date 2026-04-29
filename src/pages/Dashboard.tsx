@@ -162,6 +162,7 @@ const DashboardPage = () => {
   const [scheduledWeek, setScheduledWeek] = useState<ScheduledPaymentRow[]>([]);
 
   const [categoriesTab, setCategoriesTab] = useState<"paid" | "pending">("paid");
+  const [incomeTab, setIncomeTab] = useState<"paid" | "pending">("paid");
   const [flowTab, setFlowTab] = useState<"realized" | "projected">("realized");
 
   const monthStart = useMemo(() => startOfMonth(selectedMonth), [selectedMonth]);
@@ -365,6 +366,30 @@ const totalBankBalance = useMemo(() => accounts.reduce((sum, account) => sum + N
     return { rows, total };
   }, [categoriesTab, transactions]);
 
+  const incomeDonutData = useMemo(() => {
+    const grouped = new Map<string, { name: string; value: number; color: string }>();
+    transactions
+      .filter((tx) => tx.type === "income")
+      .filter((tx) => (incomeTab === "paid" ? tx.status === "paid" : tx.status === "pending"))
+      .forEach((tx) => {
+        const rawCategory = Array.isArray(tx.categories) ? tx.categories[0] : tx.categories;
+        const key = tx.category_id || rawCategory?.id || "sem_categoria";
+        const name = rawCategory?.name || "Sem categoria";
+        const color = rawCategory?.color || "#22c55e";
+        const value = Number(tx.amount || 0);
+        const current = grouped.get(key);
+        if (current) current.value += value;
+        else grouped.set(key, { name, value, color });
+      });
+
+    const total = [...grouped.values()].reduce((sum, item) => sum + item.value, 0);
+    const rows = [...grouped.values()]
+      .map((item) => ({ ...item, percentage: total > 0 ? (item.value / total) * 100 : 0 }))
+      .sort((a, b) => b.value - a.value);
+
+    return { rows, total };
+  }, [incomeTab, transactions]);
+
   const flowData = useMemo(() => {
     const daysInMonth = monthEnd.getDate();
     const rows = Array.from({ length: daysInMonth }, (_, index) => ({ day: index + 1, change: 0, saldo: 0 }));
@@ -500,6 +525,67 @@ const totalBankBalance = useMemo(() => accounts.reduce((sum, account) => sum + N
             <div className="max-h-[220px] flex-1 space-y-2 overflow-y-auto pr-1">
               {donutData.rows.length ? (
                 donutData.rows.map((item) => (
+                  <div key={item.name} className="flex items-center justify-between rounded-lg border border-border bg-secondary/20 px-3 py-2">
+                    <div className="flex items-center gap-2">
+                      <span className="h-2 w-2 rounded-full" style={{ backgroundColor: item.color }} />
+                      <span className="text-sm text-foreground">{item.name}</span>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-sm font-semibold text-foreground">{ptCurrency.format(item.value)}</p>
+                      <p className="text-xs text-muted-foreground">{item.percentage.toFixed(1)}%</p>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="flex h-full items-center justify-center text-sm text-muted-foreground">Sem dados no período</div>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="rounded-xl border-border bg-card">
+          <CardHeader className="space-y-2">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-lg font-semibold">Receitas por Categoria</CardTitle>
+              <div className="flex rounded-lg bg-secondary p-1">
+                <button type="button" onClick={() => setIncomeTab("paid")} className={cn("rounded-md px-3 py-1 text-xs font-semibold", incomeTab === "paid" ? "bg-primary text-primary-foreground" : "text-muted-foreground")}>Recebido</button>
+                <button type="button" onClick={() => setIncomeTab("pending")} className={cn("rounded-md px-3 py-1 text-xs font-semibold", incomeTab === "pending" ? "bg-primary text-primary-foreground" : "text-muted-foreground")}>A Receber</button>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-4 lg:flex-row">
+            <div className="relative h-[220px] w-full lg:w-1/2">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  {incomeDonutData.rows.length ? (
+                    <Pie data={incomeDonutData.rows} dataKey="value" nameKey="name" innerRadius={60} outerRadius={90} paddingAngle={2} stroke="none">
+                      {incomeDonutData.rows.map((entry, idx) => (
+                        <Cell key={`${entry.name}-${idx}`} fill={entry.color} />
+                      ))}
+                    </Pie>
+                  ) : (
+                    <Pie data={[{ value: 1 }]} dataKey="value" innerRadius={60} outerRadius={90} stroke="none" fill="hsl(var(--border))" />
+                  )}
+                  <Tooltip
+                    formatter={(value: number, _name: string, payload: { payload?: { percentage?: number } }) => [
+                      ptCurrency.format(Number(value || 0)),
+                      `${(payload.payload?.percentage ?? 0).toFixed(1)}%`,
+                    ]}
+                    contentStyle={tooltipStyle}
+                    labelStyle={{ color: chartColors.tooltipText }}
+                  />
+                </PieChart>
+              </ResponsiveContainer>
+              <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
+                <p className="text-sm font-semibold text-foreground">{formatCompactBRL(incomeDonutData.total)}</p>
+                <p className="text-xs uppercase tracking-[0.5px] text-muted-foreground">TOTAL</p>
+                {!incomeDonutData.rows.length && <p className="mt-2 text-xs text-muted-foreground">Sem receitas no período</p>}
+              </div>
+            </div>
+
+            <div className="max-h-[220px] flex-1 space-y-2 overflow-y-auto pr-1">
+              {incomeDonutData.rows.length ? (
+                incomeDonutData.rows.map((item) => (
                   <div key={item.name} className="flex items-center justify-between rounded-lg border border-border bg-secondary/20 px-3 py-2">
                     <div className="flex items-center gap-2">
                       <span className="h-2 w-2 rounded-full" style={{ backgroundColor: item.color }} />
