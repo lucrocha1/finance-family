@@ -135,7 +135,7 @@ const SetupFamilyPage = () => {
 
                   {createError && <p className="text-sm text-destructive">{createError}</p>}
 
-                  <Button type="submit" className="h-11 w-full rounded-lg bg-primary text-primary-foreground hover:bg-primary/90" disabled={createLoading}>
+                  <Button type="submit" className="h-11 w-full rounded-lg bg-primary text-primary-foreground hover:bg-primary-hover" disabled={createLoading}>
                     {createLoading ? (
                       <>
                         <Loader2 className="h-4 w-4 animate-spin" />
