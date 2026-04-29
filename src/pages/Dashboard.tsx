@@ -4,7 +4,6 @@ import {
   ArrowDownRight,
   ArrowUpRight,
   CalendarCheck2,
-  CheckCircle2,
   ChevronLeft,
   ChevronRight,
   CreditCard,
@@ -151,7 +150,6 @@ const DashboardPage = () => {
       setCards([]);
       setCardCommitments([]);
       setScheduledMonth([]);
-      setScheduledToday([]);
       setScheduledWeek([]);
       return;
     }
