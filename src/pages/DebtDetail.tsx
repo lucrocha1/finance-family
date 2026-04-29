@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ArrowDownLeft, ArrowLeft, ArrowUpRight, Building2, Handshake, Trash2, User } from "lucide-react";
+import { ArrowLeft, Trash2 } from "lucide-react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { z } from "zod";
 
