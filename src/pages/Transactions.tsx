@@ -439,6 +439,10 @@ const TransactionsPage = () => {
         due.setMonth(due.getMonth() + index);
         return {
           ...base,
+          // Only the first installment can inherit the form status (paid/pending);
+          // future ones are pending until the user marks them paid or the
+          // generated transaction's due date arrives.
+          status: index === 0 ? base.status : "pending",
           description: `${parsed.data.description.trim()} (${index + 1}/${count})`,
           amount: (baseCents + (index < remainder ? 1 : 0)) / 100,
           date: toISODate(due),
