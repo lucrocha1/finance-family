@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Check, Pencil, Plus, Trash2 } from "lucide-react";
-import { useNavigate } from "react-router-dom";
 import { z } from "zod";
 
 import {
@@ -114,7 +113,6 @@ const getCycleWindow = (closingDay: number, baseDate = new Date()) => {
 const CardsPage = () => {
   const { family } = useFamily();
   const { user } = useAuth();
-  const navigate = useNavigate();
 
   const [loading, setLoading] = useState(true);
   const [cards, setCards] = useState<CardRow[]>([]);
@@ -407,7 +405,7 @@ const CardsPage = () => {
 
                 <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/35 opacity-0 transition-opacity duration-200 group-hover:opacity-100">
                   <div className="pointer-events-auto flex gap-2">
-                    <Button size="sm" className="h-9 rounded-lg px-4 text-xs font-semibold" onClick={() => navigate(`/cards/${card.id}`)}>Ver fatura</Button>
+                    <Button size="sm" className="h-9 rounded-lg px-4 text-xs font-semibold" onClick={() => toast("Detalhe da fatura entra na Fase 4B")}>Ver fatura</Button>
                     <Button size="sm" variant="outline" className="h-9 rounded-lg border-white/50 bg-transparent px-4 text-xs font-semibold text-white hover:bg-white/10" onClick={() => openEdit(card)}>
                       <Pencil className="mr-1 h-3.5 w-3.5" />
                       Editar
