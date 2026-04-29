@@ -68,14 +68,6 @@ const App = () => (
               <Route path="/family" element={<FamilyPage />} />
               <Route path="/settings" element={<SettingsPage />} />
             </Route>
-            <Route
-              path="/dashboard-old"
-              element={
-                <ProtectedRoute>
-                  <DashboardPage />
-                </ProtectedRoute>
-              }
-            />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </BrowserRouter>
