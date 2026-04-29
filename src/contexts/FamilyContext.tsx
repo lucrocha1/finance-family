@@ -39,6 +39,7 @@ type FamilyContextValue = {
   currentUser: CurrentUserProfile | null;
   isAdmin: boolean;
   loading: boolean;
+  error: string | null;
   refetch: () => Promise<void>;
 };
 
@@ -54,6 +55,7 @@ export const FamilyProvider = ({ children }: FamilyProviderProps) => {
   const [family, setFamily] = useState<Family | null>(null);
   const [members, setMembers] = useState<FamilyMember[]>([]);
   const [currentUser, setCurrentUser] = useState<CurrentUserProfile | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   const loadFamilyData = useCallback(async () => {
@@ -61,17 +63,28 @@ export const FamilyProvider = ({ children }: FamilyProviderProps) => {
       setFamily(null);
       setMembers([]);
       setCurrentUser(null);
+      setError(null);
       setLoading(false);
       return;
     }
 
     setLoading(true);
+    setError(null);
 
-    const { data: profileData } = await supabase
+    const { data: profileData, error: profileError } = await supabase
       .from("profiles")
       .select("id, email, full_name, family_id, created_at")
       .eq("id", user.id)
       .maybeSingle();
+
+    if (profileError) {
+      setCurrentUser(null);
+      setFamily(null);
+      setMembers([]);
+      setError(profileError.message);
+      setLoading(false);
+      return;
+    }
 
     setCurrentUser(profileData ?? null);
 
@@ -82,13 +95,21 @@ export const FamilyProvider = ({ children }: FamilyProviderProps) => {
       return;
     }
 
-    const [{ data: familyData }, { data: membersData }] = await Promise.all([
+    const [{ data: familyData, error: familyError }, { data: membersData, error: membersError }] = await Promise.all([
       supabase.from("families").select("id, name, invite_code").eq("id", profileData.family_id).maybeSingle(),
       supabase
         .from("family_members")
         .select("id, user_id, family_id, role, created_at, profiles ( id, email, full_name, avatar_url )")
         .eq("family_id", profileData.family_id),
     ]);
+
+    if (familyError || membersError) {
+      setFamily(null);
+      setMembers([]);
+      setError(familyError?.message ?? membersError?.message ?? "Erro ao carregar família");
+      setLoading(false);
+      return;
+    }
 
     const normalizedMembers: FamilyMember[] = (membersData ?? []).map((member) => ({
       id: member.id,
@@ -128,9 +149,10 @@ export const FamilyProvider = ({ children }: FamilyProviderProps) => {
       currentUser,
       isAdmin,
       loading,
+      error,
       refetch: loadFamilyData,
     }),
-    [currentUser, family, isAdmin, loadFamilyData, loading, members],
+    [currentUser, error, family, isAdmin, loadFamilyData, loading, members],
   );
 
   return <FamilyContext.Provider value={value}>{children}</FamilyContext.Provider>;
