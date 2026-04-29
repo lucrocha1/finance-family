@@ -8,6 +8,7 @@ import {
   Trash2,
   User,
 } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import { z } from "zod";
 
 import {
@@ -161,6 +162,7 @@ const priorityColor: Record<Priority, string> = {
 const DebtsPage = () => {
   const { family, members } = useFamily();
   const { user } = useAuth();
+  const navigate = useNavigate();
 
   const [loading, setLoading] = useState(true);
   const [debts, setDebts] = useState<DebtRow[]>([]);
@@ -823,7 +825,7 @@ const DebtsPage = () => {
                       <Button size="sm" className="rounded-md" onClick={() => openPaymentModal(debt)} disabled={uiStatus === "paid_off"}>
                         Registrar pagamento
                       </Button>
-                      <Button size="sm" variant="ghost" onClick={() => toast("Detalhes completos chegam na Fase 6B")}>Ver detalhes</Button>
+                      <Button size="sm" variant="ghost" onClick={() => navigate(`/debts/${debt.id}`)}>Ver detalhes</Button>
                       <Button size="icon" variant="ghost" onClick={() => openEdit(debt)}>
                         <Pencil className="h-4 w-4" />
                       </Button>
