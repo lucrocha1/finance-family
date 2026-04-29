@@ -261,7 +261,9 @@ const DebtsPage = () => {
   const memberNameMap = useMemo(() => {
     const map = new Map<string, string>();
     members.forEach((member) => {
-      map.set(member.user_id, member.profiles?.full_name?.trim() || member.profiles?.email || "Membro");
+      const label = member.profiles?.full_name?.trim() || member.profiles?.email || "Membro";
+      map.set(member.user_id, label);
+      map.set(member.id, label);
     });
     return map;
   }, [members]);
@@ -487,6 +489,13 @@ const DebtsPage = () => {
   const deleteDebt = async () => {
     if (!editing) return;
     setDeleting(true);
+
+    const paymentsDelete = await supabase.from("debt_payments").delete().eq("debt_id", editing.id);
+    if (paymentsDelete.error) {
+      setDeleting(false);
+      toast.error(paymentsDelete.error.message || "Erro ao excluir pagamentos");
+      return;
+    }
 
     const { error } = await supabase.from("debts").delete().eq("id", editing.id);
 
