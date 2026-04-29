@@ -657,21 +657,6 @@ const DashboardPage = () => {
           <CardContent className="space-y-2"><p className="text-xs font-semibold uppercase tracking-[0.5px] text-muted-foreground">Dia mais movimentado</p>{busiestDay ? <p className="text-2xl font-bold">{busiestDay}</p> : <div className="flex items-center gap-2 text-sm text-muted-foreground"><CalendarCheck2 className="h-4 w-4 text-muted-foreground" />Sem dados no período</div>}</CardContent>
         </Card>
 
-        <Card className="rounded-xl border-border bg-card">
-          <CardHeader><CardTitle className="text-lg font-semibold">Despesas por Usuário</CardTitle></CardHeader>
-          <CardContent className="space-y-3">
-            {expensesByUser.every((entry) => entry.total === 0) ? (
-              <div className="flex items-center gap-2 text-sm text-muted-foreground"><UserCircle2 className="h-4 w-4 text-muted-foreground" />Sem dados no período</div>
-            ) : (
-              expensesByUser.map((entry) => (
-                <div key={entry.id} className="rounded-lg border border-border bg-secondary/20 p-3">
-                  <div className="mb-2 flex items-center justify-between gap-3"><p className="flex items-center gap-2 text-sm font-semibold"><span className="flex h-8 w-8 items-center justify-center rounded-full bg-secondary text-xs font-bold">{entry.initials}</span>{entry.name}</p><p className="text-sm font-semibold tabular-nums">{ptCurrency.format(entry.total)}</p></div>
-                  <div className="h-2 w-full rounded-full bg-secondary"><div className={cn("h-2 rounded-full", entry.id === user?.id ? "bg-primary" : "bg-muted-foreground")} style={{ width: `${entry.progress}%` }} /></div>
-                </div>
-              ))
-            )}
-          </CardContent>
-        </Card>
       </div>
 
       {loading && <p className="text-center text-sm text-muted-foreground">Atualizando dados do dashboard...</p>}

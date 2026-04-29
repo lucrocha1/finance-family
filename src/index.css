@@ -218,7 +218,7 @@
   }
 }
 
-/* Promote any element with bg-card to glass — clean, with subtle shadow */
+/* Promote bg-* utilities to glass for visual cohesion across the app. */
 @layer utilities {
   .bg-card {
     background-color: hsl(var(--glass-bg)) !important;
@@ -237,5 +237,13 @@
     background-color: hsl(var(--glass-bg-strong)) !important;
     backdrop-filter: blur(calc(var(--glass-blur) + 2px)) saturate(160%);
     -webkit-backdrop-filter: blur(calc(var(--glass-blur) + 2px)) saturate(160%);
+  }
+  /* Inputs, select triggers, tab triggers, hover backgrounds: subtle glass */
+  .bg-secondary,
+  .bg-input,
+  .bg-muted {
+    background-color: hsl(var(--glass-bg)) !important;
+    backdrop-filter: blur(10px) saturate(140%);
+    -webkit-backdrop-filter: blur(10px) saturate(140%);
   }
 }
