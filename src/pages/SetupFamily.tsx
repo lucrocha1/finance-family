@@ -28,7 +28,7 @@ const joinFamilySchema = z.object({
 
 const SetupFamilyPage = () => {
   const navigate = useNavigate();
-  const { refreshProfile } = useAuth();
+  const { markFamilyLinked, refreshProfile } = useAuth();
 
   const [familyName, setFamilyName] = useState("");
   const [inviteCode, setInviteCode] = useState("");
@@ -59,7 +59,8 @@ const SetupFamilyPage = () => {
       return;
     }
 
-    await refreshProfile();
+    markFamilyLinked();
+    void refreshProfile();
     navigate("/dashboard", { replace: true });
   };
 
@@ -85,7 +86,8 @@ const SetupFamilyPage = () => {
       return;
     }
 
-    await refreshProfile();
+    markFamilyLinked();
+    void refreshProfile();
     navigate("/dashboard", { replace: true });
   };
 
