@@ -13,7 +13,6 @@ import {
   Plus,
   RefreshCw,
   Send,
-  UserCircle2,
 } from "lucide-react";
 import {
   Area,
@@ -33,7 +32,6 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { useAuth } from "@/contexts/AuthContext";
 import { useFamily } from "@/contexts/FamilyContext";
 import { supabase } from "@/integrations/supabase/client";
 import { useChartColors } from "@/lib/chartColors";
@@ -125,8 +123,7 @@ const getSparklinePath = (values: number[], width = 100, height = 60) => {
 };
 
 const DashboardPage = () => {
-  const { user } = useAuth();
-  const { family, members } = useFamily();
+  const { family } = useFamily();
   const navigate = useNavigate();
   const chartColors = useChartColors();
   const tooltipStyle = useMemo(
@@ -293,30 +290,6 @@ const DashboardPage = () => {
     });
     return [...map.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
   }, [scheduledWeek]);
-
-  const expensesByUser = useMemo(() => {
-    const totalsByUser = new Map<string, number>();
-    transactions
-      .filter((tx) => tx.type === "expense" && tx.user_id)
-      .forEach((tx) => {
-        if (!tx.user_id) return;
-        totalsByUser.set(tx.user_id, (totalsByUser.get(tx.user_id) ?? 0) + Number(tx.amount || 0));
-      });
-
-    const rows = members.map((member) => {
-      const name = member.profiles?.full_name?.trim() || member.profiles?.email || "Usuário";
-      const total = totalsByUser.get(member.user_id) ?? 0;
-      const initials = name
-        .split(/\s+/)
-        .slice(0, 2)
-        .map((part) => part[0]?.toUpperCase() ?? "")
-        .join("") || "U";
-      return { id: member.user_id, name, initials, total };
-    });
-
-    const max = rows.reduce((highest, item) => Math.max(highest, item.total), 0);
-    return rows.map((row) => ({ ...row, progress: max > 0 ? (row.total / max) * 100 : 0 })).sort((a, b) => b.total - a.total);
-  }, [members, transactions]);
 
   const donutData = useMemo(() => {
     const grouped = new Map<string, { name: string; value: number; color: string }>();
