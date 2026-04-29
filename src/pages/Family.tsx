@@ -52,6 +52,11 @@ const FamilyPage = () => {
     });
   }, [members]);
 
+  const membershipDate = useMemo(() => {
+    const currentMembership = members.find((member) => member.user_id === currentUser?.id);
+    return currentMembership?.created_at;
+  }, [currentUser?.id, members]);
+
   useEffect(() => {
     setFamilyNameInput(family?.name ?? "");
   }, [family?.name]);
@@ -245,7 +250,7 @@ const FamilyPage = () => {
           <CardTitle className="text-xl font-bold text-foreground">Dados da conta</CardTitle>
         </CardHeader>
         <CardContent>
-          <p className="text-sm text-muted-foreground">Você entrou em {formatDate(currentUser?.created_at)}</p>
+          <p className="text-sm text-muted-foreground">Você entrou em {formatDate(membershipDate ?? currentUser?.created_at)}</p>
         </CardContent>
       </Card>
     </div>
