@@ -61,13 +61,13 @@ type TransactionRow = {
   recurrence_parent_id?: string | null;
   categories?: { id?: string; name?: string; color?: string | null; type?: string | null; icon?: string | null } | { id?: string; name?: string; color?: string | null; type?: string | null; icon?: string | null }[] | null;
   accounts?: { id?: string; name?: string; institution?: string | null } | { id?: string; name?: string; institution?: string | null }[] | null;
-  cards?: { id?: string; name?: string; brand?: string | null; last4?: string | null } | { id?: string; name?: string; brand?: string | null; last4?: string | null }[] | null;
+  cards?: { id?: string; name?: string; brand?: string | null } | { id?: string; name?: string; brand?: string | null }[] | null;
   profiles?: { full_name?: string | null; email?: string | null } | { full_name?: string | null; email?: string | null }[] | null;
 };
 
 type CategoryRow = { id: string; name: string; color: string | null; type: string | null; icon: string | null };
 type AccountRow = { id: string; name: string; institution: string | null };
-type CardRow = { id: string; name: string; brand: string | null; last4: string | null };
+type CardRow = { id: string; name: string; brand: string | null };
 type RecurrenceType = "weekly" | "monthly" | "yearly";
 
 const ptCurrency = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
@@ -187,7 +187,7 @@ const TransactionsPage = () => {
         .order("date", { ascending: false }),
       supabase.from("categories").select("id, name, color, type, icon").order("name", { ascending: true }),
       supabase.from("accounts").select("id, name, institution").order("name", { ascending: true }),
-      supabase.from("cards").select("id, name, brand, last4").order("name", { ascending: true }),
+      supabase.from("cards").select("id, name, brand").order("name", { ascending: true }),
     ]);
 
     if (cardsRes.error) {
