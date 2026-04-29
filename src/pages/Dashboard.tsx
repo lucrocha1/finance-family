@@ -359,7 +359,7 @@ const DashboardPage = () => {
             <div className="flex items-start justify-between gap-3">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.5px] text-muted-foreground">Saldo do período</p>
-                <CardDescription className="mt-2 text-sm text-[hsl(var(--section-label))]">Saldo (Receitas - Despesas) no período selecionado.</CardDescription>
+                <CardDescription className="mt-2 text-sm text-muted-foreground">Saldo (Receitas - Despesas) no período selecionado.</CardDescription>
               </div>
               <span
                 className={cn(
@@ -378,8 +378,8 @@ const DashboardPage = () => {
                 <path d={sparkPath} fill="none" stroke="hsl(var(--primary))" strokeWidth="1.4" strokeLinecap="round" />
               </svg>
             ) : (
-              <div className="flex h-[60px] items-center justify-center gap-2 text-sm text-[hsl(var(--section-label))]">
-                <CalendarCheck2 className="h-4 w-4 text-[hsl(var(--placeholder-icon))]" />
+              <div className="flex h-[60px] items-center justify-center gap-2 text-sm text-muted-foreground">
+                <CalendarCheck2 className="h-4 w-4 text-muted-foreground" />
                 Sem dados no período
               </div>
             )}
@@ -389,7 +389,7 @@ const DashboardPage = () => {
         <Card className="rounded-xl border-border bg-card">
           <CardHeader className="space-y-3">
             <p className="text-xs font-semibold uppercase tracking-[0.5px] text-muted-foreground">Saldo bancário total</p>
-            <CardDescription className="text-sm text-[hsl(var(--section-label))]">Soma de todas as contas cadastradas</CardDescription>
+            <CardDescription className="text-sm text-muted-foreground">Soma de todas as contas cadastradas</CardDescription>
             <CardTitle className="text-3xl font-bold tabular-nums">{ptCurrency.format(totalBankBalance)}</CardTitle>
           </CardHeader>
           <CardContent>
@@ -412,7 +412,7 @@ const DashboardPage = () => {
                 <span className="text-sm font-semibold">Receitas</span>
               </div>
               <p className="text-lg font-bold tabular-nums">{ptCurrency.format(totals.income)}</p>
-              <p className="mt-1 text-xs text-[hsl(var(--section-label))]">Previsto: {ptCurrency.format(quickSummary.predictedIncome)}</p>
+              <p className="mt-1 text-xs text-muted-foreground">Previsto: {ptCurrency.format(quickSummary.predictedIncome)}</p>
             </div>
 
             <div className="rounded-lg border border-border bg-secondary/30 p-3">
@@ -423,7 +423,7 @@ const DashboardPage = () => {
                 <span className="text-sm font-semibold">Despesas</span>
               </div>
               <p className="text-lg font-bold tabular-nums">{ptCurrency.format(totals.expense)}</p>
-              <p className="mt-1 text-xs text-[hsl(var(--section-label))]">Previsto: {ptCurrency.format(quickSummary.predictedExpense)}</p>
+              <p className="mt-1 text-xs text-muted-foreground">Previsto: {ptCurrency.format(quickSummary.predictedExpense)}</p>
             </div>
 
             <div className="rounded-lg border border-border bg-secondary/30 p-3">
@@ -434,7 +434,7 @@ const DashboardPage = () => {
                 <span className="text-sm font-semibold">Parceladas</span>
               </div>
               <p className="text-lg font-bold tabular-nums">{quickSummary.installmentCount}</p>
-              <p className="mt-1 text-xs text-[hsl(var(--section-label))]">A pagar: {ptCurrency.format(quickSummary.installmentPending)}</p>
+              <p className="mt-1 text-xs text-muted-foreground">A pagar: {ptCurrency.format(quickSummary.installmentPending)}</p>
             </div>
 
             <div className="rounded-lg border border-border bg-secondary/30 p-3">
@@ -445,7 +445,7 @@ const DashboardPage = () => {
                 <span className="text-sm font-semibold">Recorrentes</span>
               </div>
               <p className="text-lg font-bold tabular-nums">{quickSummary.recurringCount}</p>
-              <p className="mt-1 text-xs text-[hsl(var(--section-label))]">No período</p>
+              <p className="mt-1 text-xs text-muted-foreground">No período</p>
             </div>
           </CardContent>
         </Card>
@@ -461,7 +461,7 @@ const DashboardPage = () => {
           </CardHeader>
           <CardContent className="space-y-4">
             {expensesByCard.length === 0 ? (
-              <div className="rounded-lg border border-dashed border-border bg-secondary/20 p-4 text-sm text-[hsl(var(--section-label))]">
+              <div className="rounded-lg border border-dashed border-border bg-secondary/20 p-4 text-sm text-muted-foreground">
                 <p>Nenhum cartão cadastrado.</p>
                 <Link to="/cards" className="mt-2 inline-block font-medium text-primary hover:opacity-80">
                   Ir para cartões →
@@ -469,7 +469,7 @@ const DashboardPage = () => {
               </div>
             ) : (
               expensesByCard.map((card) => {
-                const usageColor = card.ratio >= 80 ? "bg-destructive" : card.ratio >= 50 ? "bg-primary" : "bg-success";
+                const usageColor = card.ratio >= 80 ? "bg-destructive" : card.ratio >= 50 ? "bg-warning" : "bg-success";
                 return (
                   <div key={card.id} className="space-y-2 rounded-lg border border-border bg-secondary/20 p-3">
                     <div className="flex items-center justify-between gap-3">
@@ -479,11 +479,11 @@ const DashboardPage = () => {
                       </p>
                       <p className="text-sm font-semibold tabular-nums">{ptCurrency.format(card.spent)}</p>
                     </div>
-                    <p className="text-xs text-[hsl(var(--section-label))]">de {ptCurrency.format(card.limit)}</p>
+                    <p className="text-xs text-muted-foreground">de {ptCurrency.format(card.limit)}</p>
                     <div className="h-2 w-full rounded-full bg-secondary">
                       <div className={cn("h-2 rounded-full transition-all", usageColor)} style={{ width: `${card.ratio}%` }} />
                     </div>
-                    <p className="text-xs text-[hsl(var(--section-label))]">
+                    <p className="text-xs text-muted-foreground">
                       Disponível: {ptCurrency.format(card.available)} ({Math.max(100 - card.ratio, 0).toFixed(0)}%)
                     </p>
                   </div>
@@ -506,7 +506,7 @@ const DashboardPage = () => {
             <p className="text-xs font-semibold uppercase tracking-[0.5px] text-muted-foreground">Total de Compromissos</p>
             <p className="text-3xl font-bold tabular-nums">{scheduledToday.length}</p>
             {scheduledToday.length === 0 && (
-              <div className="flex items-center gap-2 text-sm text-[hsl(var(--section-label))]">
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <CheckCircle2 className="h-4 w-4 text-success" />
                 Nenhum compromisso hoje
               </div>
@@ -528,8 +528,8 @@ const DashboardPage = () => {
             {busiestDay ? (
               <p className="text-2xl font-bold">{busiestDay}</p>
             ) : (
-              <div className="flex items-center gap-2 text-sm text-[hsl(var(--section-label))]">
-                <CalendarCheck2 className="h-4 w-4 text-[hsl(var(--placeholder-icon))]" />
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <CalendarCheck2 className="h-4 w-4 text-muted-foreground" />
                 Sem dados no período
               </div>
             )}
@@ -542,8 +542,8 @@ const DashboardPage = () => {
           </CardHeader>
           <CardContent className="space-y-3">
             {expensesByUser.every((entry) => entry.total === 0) ? (
-              <div className="flex items-center gap-2 text-sm text-[hsl(var(--section-label))]">
-                <UserCircle2 className="h-4 w-4 text-[hsl(var(--placeholder-icon))]" />
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <UserCircle2 className="h-4 w-4 text-muted-foreground" />
                 Sem dados no período
               </div>
             ) : (
