@@ -18,6 +18,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "@/components/ui/sonner";
 import { useAuth } from "@/contexts/AuthContext";
 import { useFamily } from "@/contexts/FamilyContext";
@@ -113,6 +114,8 @@ const DebtDetailPage = () => {
   const [debt, setDebt] = useState<DebtRow | null>(null);
   const [payments, setPayments] = useState<DebtPaymentRow[]>([]);
 
+  const [accounts, setAccounts] = useState<Array<{ id: string; name: string }>>([]);
+  const [payAccountId, setPayAccountId] = useState<string>("none");
   const [payOpen, setPayOpen] = useState(false);
   const [paying, setPaying] = useState(false);
   const [payError, setPayError] = useState<string | null>(null);
@@ -157,10 +160,12 @@ const DebtDetailPage = () => {
 
     setLoading(true);
 
-    const [debtRes, paymentsRes] = await Promise.all([
+    const [debtRes, paymentsRes, accountsRes] = await Promise.all([
       supabase.from("debts").select("*").eq("family_id", family.id).eq("id", id).maybeSingle(),
       supabase.from("debt_payments").select("*").eq("family_id", family.id).eq("debt_id", id).order("date", { ascending: false }),
+      supabase.from("accounts").select("id, name").eq("family_id", family.id).order("name", { ascending: true }),
     ]);
+    setAccounts((accountsRes.data as Array<{ id: string; name: string }> | null) ?? []);
 
     if (debtRes.error || !debtRes.data) {
       toast.error("Dívida não encontrada");
@@ -318,6 +323,7 @@ const DebtDetailPage = () => {
     setPayAmountDigits(toMoneyDigits(defaultValue));
     setPayDate(todayIso());
     setPayNotes("");
+    setPayAccountId("none");
     setPayError(null);
     setPayOpen(true);
   };
@@ -359,6 +365,24 @@ const DebtDetailPage = () => {
       setPaying(false);
       toast.error(insertRes.error.message || "Erro ao registrar pagamento");
       return;
+    }
+
+    if (payAccountId !== "none") {
+      const isReceiving = debt.direction === "they_owe";
+      const txRes = await supabase.from("transactions").insert({
+        family_id: family.id,
+        user_id: user.id,
+        type: isReceiving ? "income" : "expense",
+        description: `${isReceiving ? "Recebimento" : "Pagamento"} de dívida — ${debt.name}`,
+        amount,
+        date: parsed.data.date,
+        status: "paid",
+        account_id: payAccountId,
+        notes: parsed.data.notes?.trim() || null,
+      });
+      if (txRes.error) {
+        toast.error("Pagamento registrado, mas falhou ao criar a transação na conta");
+      }
     }
 
     const nextPayments = [
@@ -664,6 +688,20 @@ const DebtDetailPage = () => {
             <div className="space-y-2">
               <Label>Data</Label>
               <Input type="date" value={payDate} onChange={(event) => setPayDate(event.target.value)} />
+            </div>
+
+            <div className="space-y-2">
+              <Label>Conta de débito (opcional)</Label>
+              <Select value={payAccountId} onValueChange={setPayAccountId}>
+                <SelectTrigger><SelectValue placeholder="Selecione" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Não debitar de conta</SelectItem>
+                  {accounts.map((account) => (
+                    <SelectItem key={account.id} value={account.id}>{account.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">Se selecionar, uma transação será criada e o saldo da conta atualizado.</p>
             </div>
 
             <div className="space-y-2">

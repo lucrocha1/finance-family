@@ -422,7 +422,7 @@ const DashboardPage = () => {
 
         <div className="relative flex flex-col gap-6 sm:flex-row sm:items-end sm:justify-between">
           <div className="space-y-2">
-            <p className="text-xs font-semibold uppercase tracking-[1px] text-brandDark-muted">Saldo do período</p>
+            <p className="text-xs font-semibold uppercase tracking-[1px] text-brandDark-muted">Fluxo do período (receitas − despesas)</p>
             <div className="flex items-baseline gap-3">
               <p className="text-4xl font-bold tabular-nums sm:text-5xl">{ptCurrency.format(totals.balance)}</p>
               <span className={cn("text-sm font-semibold", balanceVariation.improved ? "text-emerald-300" : "text-red-300")}>

@@ -354,11 +354,13 @@ const SettingsPage = () => {
       return;
     }
 
+    const initialBalance = moneyDigitsToValue(accountBalanceDigits);
     const payload = {
       name: accountName.trim(),
       type: accountType,
       institution: accountInstitution.trim() || null,
-      balance: moneyDigitsToValue(accountBalanceDigits),
+      initial_balance: initialBalance,
+      balance: initialBalance,
       color: accountColor,
       user_id: user.id,
       family_id: family.id,
