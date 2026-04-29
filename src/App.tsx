@@ -4,10 +4,12 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider } from "@/contexts/AuthContext";
-import { ProtectedRoute, PublicAuthRoute } from "@/components/auth/ProtectedRoute";
+import { FamilyProvider } from "@/contexts/FamilyContext";
+import { ProtectedRoute, PublicAuthRoute, SetupFamilyRoute } from "@/components/auth/ProtectedRoute";
 import { AppLayout } from "@/components/layout/AppLayout";
 import LoginPage from "./pages/Login.tsx";
 import RegisterPage from "./pages/Register.tsx";
+import SetupFamilyPage from "./pages/SetupFamily.tsx";
 import DashboardPage from "./pages/Dashboard.tsx";
 import TransactionsPage from "./pages/Transactions.tsx";
 import CardsPage from "./pages/Cards.tsx";
@@ -50,9 +52,21 @@ const App = () => (
               }
             />
             <Route
+              path="/setup-family"
+              element={
+                <SetupFamilyRoute>
+                  <FamilyProvider>
+                    <SetupFamilyPage />
+                  </FamilyProvider>
+                </SetupFamilyRoute>
+              }
+            />
+            <Route
               element={
                 <ProtectedRoute>
-                  <AppLayout />
+                  <FamilyProvider>
+                    <AppLayout />
+                  </FamilyProvider>
                 </ProtectedRoute>
               }
             >
