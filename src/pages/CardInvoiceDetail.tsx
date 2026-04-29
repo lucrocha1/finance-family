@@ -135,6 +135,13 @@ const CardInvoiceDetailPage = () => {
   const [notes, setNotes] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
 
+  const [accounts, setAccounts] = useState<Array<{ id: string; name: string }>>([]);
+  const [payOpen, setPayOpen] = useState(false);
+  const [payAccountId, setPayAccountId] = useState<string>("");
+  const [payDate, setPayDate] = useState<string>(toISODate(new Date()));
+  const [payAmountDigits, setPayAmountDigits] = useState("");
+  const [paying, setPaying] = useState(false);
+
   const loadData = useCallback(async () => {
     if (!family?.id || !id) {
       setLoading(false);
@@ -143,10 +150,12 @@ const CardInvoiceDetailPage = () => {
 
     setLoading(true);
 
-    const [cardRes, categoriesRes] = await Promise.all([
+    const [cardRes, categoriesRes, accountsRes] = await Promise.all([
       supabase.from("cards").select("*").eq("family_id", family.id).eq("id", id).maybeSingle(),
       supabase.from("categories").select("id, name, color, type").eq("family_id", family.id).eq("type", "expense").order("name", { ascending: true }),
+      supabase.from("accounts").select("id, name").eq("family_id", family.id).order("name", { ascending: true }),
     ]);
+    setAccounts((accountsRes.data as Array<{ id: string; name: string }> | null) ?? []);
 
     if (cardRes.error || !cardRes.data) {
       toast.error("Cartão não encontrado");
@@ -317,6 +326,75 @@ const CardInvoiceDetailPage = () => {
     await loadData();
   };
 
+  const openPayInvoice = () => {
+    if (!card || transactions.length === 0) return;
+    setPayAccountId(accounts[0]?.id ?? "");
+    setPayDate(toISODate(dueDate));
+    setPayAmountDigits(String(Math.round(invoiceTotal * 100)));
+    setPayOpen(true);
+  };
+
+  const payInvoice = async () => {
+    if (!card || !family?.id || !payAccountId) {
+      toast.error("Selecione uma conta para pagar a fatura");
+      return;
+    }
+    const amountValue = Number(payAmountDigits || "0") / 100;
+    if (amountValue <= 0) {
+      toast.error("Valor inválido");
+      return;
+    }
+
+    setPaying(true);
+
+    // 1. Insert the bank-account-side payment as an expense (no card_id)
+    const { data: userData } = await supabase.auth.getUser();
+    const userId = userData?.user?.id;
+    if (!userId) {
+      setPaying(false);
+      toast.error("Sessão expirada");
+      return;
+    }
+
+    const { error: payError } = await supabase.from("transactions").insert({
+      family_id: family.id,
+      user_id: userId,
+      type: "expense",
+      description: `Pagamento Fatura — ${card.name} (${formatMonthYear(selectedInvoiceMonth)})`,
+      amount: amountValue,
+      date: payDate,
+      account_id: payAccountId,
+      card_id: null,
+      status: "paid",
+    });
+
+    if (payError) {
+      setPaying(false);
+      toast.error(payError.message || "Falha ao registrar pagamento");
+      return;
+    }
+
+    // 2. Mark all transactions in this invoice cycle as paid (releases card limit)
+    const cycle = getCycleWindow(Number(card.closing_day || 1), selectedInvoiceMonth);
+    const ids = transactions.map((tx) => tx.id);
+    if (ids.length > 0) {
+      const { error: updErr } = await supabase
+        .from("transactions")
+        .update({ status: "paid" })
+        .in("id", ids)
+        .gte("date", cycle.start)
+        .lte("date", cycle.end);
+      if (updErr) {
+        toast.error("Pagamento criado, mas falhou ao marcar parcelas como pagas");
+      }
+    }
+
+    setPaying(false);
+    setPayOpen(false);
+    toast.success("Fatura paga!");
+    await loadData();
+  };
+
   if (loading) {
     return <div className="rounded-xl border border-border bg-card p-8 text-sm text-muted-foreground">Carregando fatura...</div>;
   }
@@ -359,6 +437,11 @@ const CardInvoiceDetailPage = () => {
         <Button variant="outline" size="icon" className="h-9 w-9 rounded-lg" onClick={() => setSelectedInvoiceMonth((prev) => startOfMonth(new Date(prev.getFullYear(), prev.getMonth() + 1, 1)))}>
           <ChevronRight className="h-4 w-4" />
         </Button>
+        {transactions.length > 0 && invoiceStatus.label !== "Paga" && (
+          <Button onClick={openPayInvoice} className="ml-3 h-9 rounded-lg">
+            Pagar Fatura
+          </Button>
+        )}
       </div>
 
       <div className="grid gap-4 lg:grid-cols-[1fr_220px]">
@@ -526,6 +609,70 @@ const CardInvoiceDetailPage = () => {
             <Button type="button" onClick={() => void saveEdit()} disabled={saving}>
               {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
               Salvar alterações
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={payOpen} onOpenChange={setPayOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Pagar Fatura — {card.name}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <p className="text-sm text-muted-foreground">
+              Cria uma despesa na conta selecionada e marca todas as parcelas desta fatura como pagas (libera o limite do cartão).
+            </p>
+
+            <div className="space-y-2">
+              <Label>Conta de débito</Label>
+              {accounts.length === 0 ? (
+                <p className="text-sm text-destructive">Nenhuma conta cadastrada. Cadastre uma conta antes de pagar a fatura.</p>
+              ) : (
+                <Select value={payAccountId} onValueChange={setPayAccountId}>
+                  <SelectTrigger className="h-[42px] rounded-lg border-border bg-secondary text-foreground">
+                    <SelectValue placeholder="Selecione" />
+                  </SelectTrigger>
+                  <SelectContent className="border-border bg-card text-card-foreground">
+                    {accounts.map((account) => (
+                      <SelectItem key={account.id} value={account.id}>
+                        {account.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <Label>Valor</Label>
+              <Input
+                inputMode="numeric"
+                value={ptCurrency.format(Number(payAmountDigits || "0") / 100)}
+                onChange={(event) => setPayAmountDigits(event.target.value.replace(/\D/g, ""))}
+                className="h-[42px] rounded-lg border-border bg-secondary text-foreground"
+              />
+              <p className="text-xs text-muted-foreground">Total da fatura: {ptCurrency.format(invoiceTotal)}</p>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Data do pagamento</Label>
+              <Input
+                type="date"
+                value={payDate}
+                onChange={(event) => setPayDate(event.target.value)}
+                className="h-[42px] rounded-lg border-border bg-secondary text-foreground"
+              />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button type="button" variant="ghost" onClick={() => setPayOpen(false)}>
+              Cancelar
+            </Button>
+            <Button type="button" onClick={() => void payInvoice()} disabled={paying || accounts.length === 0}>
+              {paying ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              Confirmar pagamento
             </Button>
           </DialogFooter>
         </DialogContent>

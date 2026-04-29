@@ -275,10 +275,14 @@ const DashboardPage = () => {
   }, [family?.id, monthEnd, monthStart, prevMonthEnd, prevMonthStart, weekEnd, weekStart]);
 
   const totals = useMemo(() => {
-    const income = transactions.filter((tx) => tx.type === "income").reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
-    const expense = transactions.filter((tx) => tx.type === "expense").reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
-    const previousIncome = previousTransactions.filter((tx) => tx.type === "income").reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
-    const previousExpense = previousTransactions.filter((tx) => tx.type === "expense").reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+    // Fluxo de caixa = só conta o que realmente passa pela conta bancária.
+    // Despesas de cartão entram no fluxo apenas quando a fatura é paga
+    // (via "Pagar Fatura", que gera uma transação sem card_id).
+    const isCash = (tx: TransactionRow) => !tx.card_id;
+    const income = transactions.filter((tx) => tx.type === "income" && isCash(tx)).reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+    const expense = transactions.filter((tx) => tx.type === "expense" && isCash(tx)).reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+    const previousIncome = previousTransactions.filter((tx) => tx.type === "income" && isCash(tx)).reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+    const previousExpense = previousTransactions.filter((tx) => tx.type === "expense" && isCash(tx)).reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
     return { income, expense, balance: income - expense, previousBalance: previousIncome - previousExpense };
   }, [previousTransactions, transactions]);
 
