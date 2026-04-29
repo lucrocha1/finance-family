@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Copy, Loader2, PencilLine, Trash2, Users } from "lucide-react";
 import { z } from "zod";
 
@@ -51,6 +51,10 @@ const FamilyPage = () => {
       return a.role === "admin" ? -1 : 1;
     });
   }, [members]);
+
+  useEffect(() => {
+    setFamilyNameInput(family?.name ?? "");
+  }, [family?.name]);
 
   const handleCopyCode = async () => {
     if (!family?.invite_code) return;
