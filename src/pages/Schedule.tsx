@@ -390,7 +390,12 @@ const SchedulePage = () => {
 
     const cardsList = ((cardsRes.data ?? []) as Array<{ id: string; name: string; closing_day: number | null; due_day: number | null }>);
     const cardTxs = ((cardTxRes.data ?? []) as Array<{ card_id: string | null; amount: number; date: string }>);
+    if (cardsRes.error) console.warn("[Schedule] cards query failed:", cardsRes.error);
+    if (cardTxRes.error) console.warn("[Schedule] card txs query failed:", cardTxRes.error);
+    console.info("[Schedule] cards:", cardsList);
+    console.info("[Schedule] cardTxs:", cardTxs.length, "txs in window");
     const cardEvents = buildCardEvents(cardsList, cardTxs, monthStart, monthEnd);
+    console.info("[Schedule] cardEvents (current month):", cardEvents);
     // Compute window for each list separately
     const todayDate = new Date();
     const next7DateEnd = new Date(todayDate);
