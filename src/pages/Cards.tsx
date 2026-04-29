@@ -1,5 +1,5 @@
-import { useCallback, useMemo, useState } from "react";
-import { Check, CreditCard, Pencil, Plus, Trash2 } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Check, Pencil, Plus, Trash2 } from "lucide-react";
 import { z } from "zod";
 
 import {
@@ -207,9 +207,9 @@ const CardsPage = () => {
     setLoading(false);
   }, [family?.id]);
 
-  useState(() => {
+  useEffect(() => {
     void loadData();
-  });
+  }, [loadData]);
 
   const resetForm = () => {
     setEditing(null);
@@ -331,7 +331,7 @@ const CardsPage = () => {
       <div className="flex items-center justify-end">
         <Button onClick={openCreate} className="h-10 rounded-lg font-semibold">
           <Plus className="mr-2 h-4 w-4" />
-          Novo Cartão
+          + Novo Cartão
         </Button>
       </div>
 
