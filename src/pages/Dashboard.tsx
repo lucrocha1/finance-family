@@ -73,7 +73,7 @@ type ScheduledPaymentRow = {
   due_date: string;
   amount: number | null;
   type: string | null;
-  status: string | null;
+  is_paid: boolean | null;
 };
 
 const ptCurrency = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
@@ -190,14 +190,14 @@ const DashboardPage = () => {
         supabase.from("cards").select("id, family_id, name, brand, credit_limit").eq("family_id", family.id),
         supabase
           .from("scheduled_payments")
-          .select("id, family_id, due_date, amount, type, status")
+          .select("id, family_id, due_date, amount, type, is_paid")
           .eq("family_id", family.id)
           .gte("due_date", toISODate(monthStart))
           .lte("due_date", toISODate(monthEnd)),
-        supabase.from("scheduled_payments").select("id, family_id, due_date, amount, type, status").eq("family_id", family.id).eq("due_date", toISODate(new Date())),
+        supabase.from("scheduled_payments").select("id, family_id, due_date, amount, type, is_paid").eq("family_id", family.id).eq("due_date", toISODate(new Date())),
         supabase
           .from("scheduled_payments")
-          .select("id, family_id, due_date, amount, type, status")
+          .select("id, family_id, due_date, amount, type, is_paid")
           .eq("family_id", family.id)
           .gte("due_date", toISODate(weekStart))
           .lte("due_date", toISODate(weekEnd)),
@@ -251,7 +251,7 @@ const DashboardPage = () => {
   const totalBankBalance = useMemo(() => accounts.reduce((sum, account) => sum + Number(account.balance || 0), 0), [accounts]);
 
   const quickSummary = useMemo(() => {
-    const pendingInMonth = scheduledMonth.filter((item) => item.status !== "paid");
+    const pendingInMonth = scheduledMonth.filter((item) => !item.is_paid);
     const predictedIncome = pendingInMonth.filter((item) => item.type === "income").reduce((sum, item) => sum + Number(item.amount || 0), 0);
     const predictedExpense = pendingInMonth.filter((item) => item.type === "expense").reduce((sum, item) => sum + Number(item.amount || 0), 0);
     return {

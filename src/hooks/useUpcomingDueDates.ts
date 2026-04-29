@@ -47,7 +47,7 @@ export const useUpcomingDueDates = (familyId: string | null | undefined) => {
           .order("date", { ascending: true }),
         supabase
           .from("scheduled_payments")
-          .select("id, description, amount, due_date, type, status, is_paid")
+          .select("id, description, amount, due_date, type, is_paid")
           .eq("family_id", familyId)
           .gte("due_date", today)
           .lte("due_date", end)
@@ -66,7 +66,7 @@ export const useUpcomingDueDates = (familyId: string | null | undefined) => {
       }));
 
       const schedItems: DueItem[] = (schedRes.data ?? [])
-        .filter((s: any) => !s.is_paid && s.status !== "paid")
+        .filter((s: any) => !s.is_paid)
         .map((s: any) => ({
           id: `sched-${s.id}`,
           source: "scheduled",

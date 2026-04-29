@@ -181,7 +181,7 @@ const TransactionsPage = () => {
     const [txRes, categoriesRes, accountsRes, cardsRes] = await Promise.all([
       supabase
         .from("transactions")
-        .select("*, categories(*), accounts(*), cards(*), profiles:user_id(full_name, email)")
+        .select("*, categories(*), accounts(*), cards(*)")
         .gte("date", toISODate(monthStart))
         .lte("date", toISODate(monthEnd))
         .order("date", { ascending: false }),
