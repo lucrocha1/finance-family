@@ -70,7 +70,14 @@ export const AppLayout = () => {
     return ALL_ITEMS.find((item) => item.path === pathname)?.label ?? "Dashboard";
   }, [pathname]);
 
-  const displayName = profile?.full_name?.trim() || user?.user_metadata?.full_name || user?.email || "Usuário";
+  const metadataName =
+    typeof user?.user_metadata?.full_name === "string"
+      ? user.user_metadata.full_name
+      : typeof user?.user_metadata?.name === "string"
+        ? user.user_metadata.name
+        : "";
+
+  const displayName = profile?.full_name?.trim() || metadataName.trim() || "Usuário";
 
   const initials = displayName
     .toString()
@@ -143,7 +150,7 @@ export const AppLayout = () => {
         style={{ width: isMobile ? "260px" : desktopSidebarWidth }}
       >
         <div className="relative flex h-16 items-center px-4">
-          <p className="text-xl font-bold text-primary">{isCollapsed ? "💰" : "💰 FinanceApp"}</p>
+          <p className="text-xl font-bold text-primary">{isCollapsed ? "💰" : "💰 Finance Family"}</p>
           {!isMobile && (
             <Button
               type="button"
