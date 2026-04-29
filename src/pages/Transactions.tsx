@@ -4,10 +4,13 @@ import {
   ArrowLeftRight,
   ArrowUp,
   CalendarIcon,
+  CheckCircle,
   ChevronLeft,
   ChevronRight,
   CreditCard,
   Loader2,
+  Pencil,
+  Trash2,
   TrendingDown,
   TrendingUp,
 } from "lucide-react";
@@ -32,6 +35,7 @@ import { cn } from "@/lib/utils";
 
 type TxType = "income" | "expense" | "transfer" | string;
 type TxStatus = "paid" | "pending" | string | null;
+type StatusFilter = "all" | "paid" | "pending" | "overdue";
 
 type TransactionRow = {
   id: string;
@@ -45,13 +49,13 @@ type TransactionRow = {
   type: TxType;
   status: TxStatus;
   date: string;
+  notes?: string | null;
   is_installment?: boolean | null;
-  installment_number?: number | null;
   installment_current?: number | null;
-  current_installment?: number | null;
-  installments?: number | null;
   installment_total?: number | null;
-  total_installments?: number | null;
+  installment_group_id?: string | null;
+  is_recurring?: boolean | null;
+  recurrence_type?: string | null;
   categories?: { id?: string; name?: string; color?: string | null; type?: string | null; icon?: string | null } | { id?: string; name?: string; color?: string | null; type?: string | null; icon?: string | null }[] | null;
   accounts?: { id?: string; name?: string; institution?: string | null } | { id?: string; name?: string; institution?: string | null }[] | null;
   cards?: { id?: string; name?: string; brand?: string | null; last4?: string | null } | { id?: string; name?: string; brand?: string | null; last4?: string | null }[] | null;
@@ -68,20 +72,18 @@ const startOfMonth = (base: Date) => new Date(base.getFullYear(), base.getMonth(
 const endOfMonth = (base: Date) => new Date(base.getFullYear(), base.getMonth() + 1, 0);
 const formatMonthYear = (date: Date) => date.toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
 const capitalize = (value: string) => value.charAt(0).toUpperCase() + value.slice(1);
-const toISODate = (date: Date) => {
-  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
-  return local.toISOString().slice(0, 10);
-};
 const asSingle = <T,>(value: T | T[] | null | undefined): T | null => (Array.isArray(value) ? (value[0] ?? null) : (value ?? null));
+const toISODate = (date: Date) => new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
 const formatDateDDMM = (iso: string) => new Date(`${iso}T00:00:00`).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
 const PAGE_SIZE = 20;
 
-const transactionSchema = z
+const formSchema = z
   .object({
     type: z.enum(["income", "expense", "transfer"]),
-    description: z.string().trim().min(2, "Descrição obrigatória").max(120, "Descrição muito longa"),
-    amountCents: z.number().int().min(1, "Valor obrigatório"),
-    date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Data inválida"),
+    description: z.string().trim().min(2).max(120),
+    amountCents: z.number().int().min(1),
+    date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    status: z.enum(["paid", "pending"]),
     categoryId: z.string().nullable(),
     accountId: z.string().nullable(),
     fromAccountId: z.string().nullable(),
@@ -94,26 +96,22 @@ const transactionSchema = z
     notes: z.string().trim().max(600).optional(),
   })
   .superRefine((values, ctx) => {
-    if (values.type !== "transfer" && !values.categoryId) {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["categoryId"], message: "Categoria é obrigatória" });
-    }
+    if (values.type !== "transfer" && !values.categoryId) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["categoryId"], message: "Categoria obrigatória" });
     if (values.type === "transfer") {
-      if (!values.fromAccountId) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["fromAccountId"], message: "Conta origem é obrigatória" });
-      if (!values.toAccountId) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["toAccountId"], message: "Conta destino é obrigatória" });
-      if (values.fromAccountId && values.toAccountId && values.fromAccountId === values.toAccountId) {
-        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["toAccountId"], message: "Contas devem ser diferentes" });
-      }
+      if (!values.fromAccountId) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["fromAccountId"], message: "Conta origem obrigatória" });
+      if (!values.toAccountId) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["toAccountId"], message: "Conta destino obrigatória" });
+      if (values.fromAccountId && values.toAccountId && values.fromAccountId === values.toAccountId) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["toAccountId"], message: "Contas devem ser diferentes" });
     }
-    if (values.type !== "transfer" && values.type !== "expense" && !values.accountId) {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["accountId"], message: "Conta é obrigatória" });
-    }
-    if (values.type === "expense" && !values.cardId && !values.accountId) {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["accountId"], message: "Conta é obrigatória quando sem cartão" });
-    }
-    if (values.type !== "expense" && values.isInstallment) {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["isInstallment"], message: "Parcelamento só para despesas" });
-    }
+    if (values.type === "expense" && !values.cardId && !values.accountId) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["accountId"], message: "Conta obrigatória" });
+    if (values.type === "income" && !values.accountId) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["accountId"], message: "Conta obrigatória" });
   });
+
+const getComputedStatus = (tx: TransactionRow): "paid" | "pending" | "overdue" => {
+  if (tx.status === "paid") return "paid";
+  const todayIso = toISODate(new Date());
+  if (tx.date < todayIso) return "overdue";
+  return "pending";
+};
 
 const TransactionsPage = () => {
   const { family, members } = useFamily();
@@ -127,6 +125,7 @@ const TransactionsPage = () => {
   const [cards, setCards] = useState<CardRow[]>([]);
 
   const [typeFilter, setTypeFilter] = useState<"all" | "income" | "expense" | "transfer">("all");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [accountFilter, setAccountFilter] = useState("all");
   const [cardFilter, setCardFilter] = useState("all");
@@ -135,10 +134,17 @@ const TransactionsPage = () => {
 
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [editing, setEditing] = useState<TransactionRow | null>(null);
+  const [editAllInstallments, setEditAllInstallments] = useState(false);
+
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<TransactionRow | null>(null);
+
   const [formType, setFormType] = useState<"income" | "expense" | "transfer">("expense");
   const [description, setDescription] = useState("");
   const [amountDigits, setAmountDigits] = useState("");
   const [date, setDate] = useState<Date>(new Date());
+  const [status, setStatus] = useState<"paid" | "pending">("paid");
   const [categoryId, setCategoryId] = useState<string>("");
   const [accountId, setAccountId] = useState<string>("");
   const [fromAccountId, setFromAccountId] = useState<string>("");
@@ -199,26 +205,11 @@ const TransactionsPage = () => {
 
   useEffect(() => {
     setPage(1);
-  }, [typeFilter, categoryFilter, accountFilter, cardFilter, memberFilter, selectedMonth]);
+  }, [typeFilter, statusFilter, categoryFilter, accountFilter, cardFilter, memberFilter, selectedMonth]);
 
   useEffect(() => {
     void loadData();
   }, [loadData]);
-
-  useEffect(() => {
-    setFormError(null);
-    if (formType === "transfer") {
-      setCategoryId("");
-      setCardId("none");
-      setIsInstallment(false);
-      setIsRecurring(false);
-      setAccountId("");
-    }
-    if (formType === "income") {
-      setCardId("none");
-      setIsInstallment(false);
-    }
-  }, [formType]);
 
   const memberMap = useMemo(() => {
     const map = new Map<string, { name: string; initials: string }>();
@@ -237,24 +228,23 @@ const TransactionsPage = () => {
 
   const filteredCategories = useMemo(() => {
     if (formType === "transfer") return [];
-    if (formType === "income") return categories.filter((c) => c.type === "income");
-    return categories.filter((c) => c.type === "expense");
+    return categories.filter((c) => c.type === (formType === "income" ? "income" : "expense"));
   }, [categories, formType]);
 
   const filtered = useMemo(
     () =>
       transactions.filter((tx) => {
         if (typeFilter !== "all" && tx.type !== typeFilter) return false;
+        if (statusFilter !== "all" && getComputedStatus(tx) !== statusFilter) return false;
         if (categoryFilter !== "all" && tx.category_id !== categoryFilter) return false;
-        const txAccount = asSingle(tx.accounts);
-        const account = tx.account_id ?? txAccount?.id ?? null;
+        const account = tx.account_id ?? asSingle(tx.accounts)?.id ?? null;
         if (accountFilter !== "all" && account !== accountFilter) return false;
         if (cardFilter === "none" && tx.card_id) return false;
         if (cardFilter !== "all" && cardFilter !== "none" && tx.card_id !== cardFilter) return false;
         if (memberFilter !== "all" && tx.user_id !== memberFilter) return false;
         return true;
       }),
-    [accountFilter, cardFilter, categoryFilter, memberFilter, transactions, typeFilter],
+    [accountFilter, cardFilter, categoryFilter, memberFilter, statusFilter, transactions, typeFilter],
   );
 
   const totals = useMemo(() => {
@@ -272,20 +262,15 @@ const TransactionsPage = () => {
   const amountCents = Number(amountDigits || "0");
   const amountValue = amountCents / 100;
   const amountDisplay = ptCurrency.format(amountValue);
-  const installmentPreview = isInstallment && installments > 1 ? `${installments}x de ${ptCurrency.format(amountValue / installments)}` : "";
-
-  const canSave = useMemo(() => {
-    if (!description.trim() || amountCents <= 0) return false;
-    if (formType === "transfer") return Boolean(fromAccountId && toAccountId && fromAccountId !== toAccountId);
-    if (formType === "expense") return Boolean(categoryId && (cardId !== "none" || accountId));
-    return Boolean(categoryId && accountId);
-  }, [accountId, amountCents, cardId, categoryId, description, formType, fromAccountId, toAccountId]);
 
   const resetForm = () => {
+    setEditing(null);
+    setEditAllInstallments(false);
     setFormType("expense");
     setDescription("");
     setAmountDigits("");
     setDate(new Date());
+    setStatus("paid");
     setCategoryId("");
     setAccountId("");
     setFromAccountId("");
@@ -299,14 +284,48 @@ const TransactionsPage = () => {
     setFormError(null);
   };
 
-  const saveTransaction = async () => {
-    if (!family?.id || !user?.id) return;
+  const openCreate = () => {
+    resetForm();
+    setStatus(toISODate(new Date()) >= toISODate(new Date()) ? "paid" : "pending");
+    setOpen(true);
+  };
 
-    const parsed = transactionSchema.safeParse({
+  const openEdit = (tx: TransactionRow) => {
+    resetForm();
+    setEditing(tx);
+    setFormType((tx.type === "income" || tx.type === "expense" || tx.type === "transfer" ? tx.type : "expense") as "income" | "expense" | "transfer");
+    setDescription(tx.description ?? "");
+    setAmountDigits(String(Math.round(Number(tx.amount || 0) * 100)));
+    setDate(new Date(`${tx.date}T00:00:00`));
+    setStatus(tx.status === "paid" ? "paid" : "pending");
+    setCategoryId(tx.category_id ?? "");
+    setAccountId(tx.account_id ?? "");
+    setFromAccountId(tx.type === "transfer" ? tx.account_id ?? "" : "");
+    setToAccountId("");
+    setCardId(tx.card_id ?? "none");
+    setIsInstallment(Boolean(tx.is_installment));
+    setInstallments(tx.installment_total ?? 2);
+    setIsRecurring(Boolean(tx.is_recurring));
+    setRecurrenceType(((tx.recurrence_type as RecurrenceType) || "monthly") as RecurrenceType);
+    setNotes(tx.notes ?? "");
+    setOpen(true);
+  };
+
+  const canSave = useMemo(() => {
+    if (!description.trim() || amountCents <= 0) return false;
+    if (formType === "transfer") return Boolean(fromAccountId && toAccountId && fromAccountId !== toAccountId);
+    if (formType === "income") return Boolean(categoryId && accountId);
+    return Boolean(categoryId && (cardId !== "none" || accountId));
+  }, [accountId, amountCents, cardId, categoryId, description, formType, fromAccountId, toAccountId]);
+
+  const persist = async () => {
+    if (!family?.id || !user?.id) return;
+    const parsed = formSchema.safeParse({
       type: formType,
       description,
       amountCents,
       date: toISODate(date),
+      status,
       categoryId: categoryId || null,
       accountId: accountId || null,
       fromAccountId: fromAccountId || null,
@@ -327,71 +346,105 @@ const TransactionsPage = () => {
     setSaving(true);
     setFormError(null);
 
-    const todayIso = toISODate(new Date());
-    const status = parsed.data.date <= todayIso ? "paid" : "pending";
     const base = {
       description: parsed.data.description.trim(),
       amount: parsed.data.amountCents / 100,
       date: parsed.data.date,
       notes: parsed.data.notes?.trim() || null,
-      user_id: user.id,
-      family_id: family.id,
-      status,
+      status: parsed.data.status,
+      category_id: parsed.data.type === "transfer" ? null : parsed.data.categoryId,
+      account_id: parsed.data.type === "transfer" ? parsed.data.fromAccountId : parsed.data.type === "expense" && parsed.data.cardId ? null : parsed.data.accountId,
+      card_id: parsed.data.type === "expense" ? parsed.data.cardId : null,
+      is_recurring: parsed.data.type === "expense" ? parsed.data.isRecurring : false,
+      recurrence_type: parsed.data.type === "expense" && parsed.data.isRecurring ? parsed.data.recurrenceType : null,
+      is_installment: parsed.data.type === "expense" ? parsed.data.isInstallment : false,
     };
 
-    let insertError: string | null = null;
+    let errorMessage: string | null = null;
 
-    if (parsed.data.type === "transfer") {
+    if (editing) {
+      if (editAllInstallments && editing.installment_group_id) {
+        const { data: rows, error } = await supabase
+          .from("transactions")
+          .select("id, installment_current, installment_total")
+          .eq("installment_group_id", editing.installment_group_id)
+          .order("installment_current", { ascending: true });
+        if (error) errorMessage = error.message;
+        if (!error && rows) {
+          const count = rows.length;
+          const totalCents = parsed.data.amountCents;
+          const baseCents = Math.floor(totalCents / count);
+          const remainder = totalCents % count;
+          const updates = rows.map((row, index) =>
+            supabase
+              .from("transactions")
+              .update({
+                description: parsed.data.description.trim(),
+                amount: (baseCents + (index < remainder ? 1 : 0)) / 100,
+                category_id: base.category_id,
+                account_id: base.account_id,
+                card_id: base.card_id,
+                notes: base.notes,
+                status: base.status,
+              })
+              .eq("id", row.id),
+          );
+          const result = await Promise.all(updates);
+          const failed = result.find((r) => r.error);
+          if (failed?.error) errorMessage = failed.error.message;
+        }
+      } else {
+        const { error } = await supabase
+          .from("transactions")
+          .update({
+            description: base.description,
+            amount: base.amount,
+            date: base.date,
+            category_id: base.category_id,
+            account_id: base.account_id,
+            card_id: base.card_id,
+            notes: base.notes,
+            status: base.status,
+          })
+          .eq("id", editing.id);
+        if (error) errorMessage = error.message;
+      }
+    } else if (parsed.data.type === "transfer") {
       const payload = [
-        { ...base, type: "transfer", account_id: parsed.data.fromAccountId, category_id: null, card_id: null, is_installment: false, is_recurring: false, recurrence_type: null },
-        { ...base, type: "transfer", account_id: parsed.data.toAccountId, category_id: null, card_id: null, is_installment: false, is_recurring: false, recurrence_type: null },
+        { ...base, type: "transfer", account_id: parsed.data.fromAccountId, user_id: user.id, family_id: family.id },
+        { ...base, type: "transfer", account_id: parsed.data.toAccountId, user_id: user.id, family_id: family.id },
       ];
       const { error } = await supabase.from("transactions").insert(payload);
-      if (error) insertError = error.message;
+      if (error) errorMessage = error.message;
     } else if (parsed.data.type === "expense" && parsed.data.isInstallment) {
-      const groupId = crypto.randomUUID();
       const count = parsed.data.installments;
+      const groupId = crypto.randomUUID();
       const baseCents = Math.floor(parsed.data.amountCents / count);
       const remainder = parsed.data.amountCents % count;
       const rows = Array.from({ length: count }, (_, index) => {
         const due = new Date(date);
         due.setMonth(due.getMonth() + index);
-        const cents = baseCents + (index < remainder ? 1 : 0);
         return {
           ...base,
-          date: toISODate(due),
           description: `${parsed.data.description.trim()} (${index + 1}/${count})`,
-          type: parsed.data.type,
-          amount: cents / 100,
-          is_recurring: false,
-          recurrence_type: null,
-          is_installment: true,
+          amount: (baseCents + (index < remainder ? 1 : 0)) / 100,
+          date: toISODate(due),
+          installment_group_id: groupId,
           installment_current: index + 1,
           installment_total: count,
-          installment_group_id: groupId,
-          category_id: parsed.data.categoryId,
-          account_id: parsed.data.cardId ? null : parsed.data.accountId,
-          card_id: parsed.data.cardId,
+          type: "expense",
+          user_id: user.id,
+          family_id: family.id,
         };
       });
       const { error } = await supabase.from("transactions").insert(rows);
-      if (error) insertError = error.message;
+      if (error) errorMessage = error.message;
     } else {
-      const payload = {
-        ...base,
-        type: parsed.data.type,
-        is_recurring: parsed.data.isRecurring,
-        recurrence_type: parsed.data.isRecurring ? parsed.data.recurrenceType : null,
-        is_installment: false,
-        category_id: parsed.data.categoryId,
-        account_id: parsed.data.type === "expense" && parsed.data.cardId ? null : parsed.data.accountId,
-        card_id: parsed.data.type === "expense" ? parsed.data.cardId : null,
-      };
-      const { error } = await supabase.from("transactions").insert(payload);
-      if (error) insertError = error.message;
+      const { error } = await supabase.from("transactions").insert({ ...base, type: parsed.data.type, user_id: user.id, family_id: family.id });
+      if (error) errorMessage = error.message;
     }
 
-    if (insertError) {
+    if (errorMessage) {
       setFormError("Não foi possível salvar a transação");
       setSaving(false);
       return;
@@ -400,87 +453,81 @@ const TransactionsPage = () => {
     await loadData();
     setSaving(false);
     setOpen(false);
+    toast.success(editing ? "Transação atualizada!" : "Transação criada!");
     resetForm();
-    toast.success("Transação criada!");
+  };
+
+  const openDelete = (tx: TransactionRow) => {
+    setDeleteTarget(tx);
+    setDeleteOpen(true);
+  };
+
+  const executeDelete = async (mode: "one" | "remaining" | "all") => {
+    if (!deleteTarget) return;
+    let query = supabase.from("transactions").delete();
+
+    if (mode === "one" || !deleteTarget.installment_group_id) {
+      query = query.eq("id", deleteTarget.id);
+    } else if (mode === "remaining") {
+      query = query.eq("installment_group_id", deleteTarget.installment_group_id).gte("installment_current", deleteTarget.installment_current ?? 1);
+    } else {
+      query = query.eq("installment_group_id", deleteTarget.installment_group_id);
+    }
+
+    const { error } = await query;
+    if (error) {
+      toast.error("Não foi possível excluir a transação");
+      return;
+    }
+
+    setDeleteOpen(false);
+    setDeleteTarget(null);
+    if (editing?.id === deleteTarget.id) {
+      setOpen(false);
+      resetForm();
+    }
+    await loadData();
+    toast.error("Transação excluída");
+  };
+
+  const markPaid = async (tx: TransactionRow) => {
+    const { error } = await supabase.from("transactions").update({ status: "paid" }).eq("id", tx.id);
+    if (error) {
+      toast.error("Não foi possível atualizar o status");
+      return;
+    }
+    await loadData();
+    toast.success("Transação marcada como paga");
   };
 
   return (
     <div className="space-y-6">
       <div className="flex justify-end">
-        <Button onClick={() => setOpen(true)} className="h-10 rounded-lg px-4 font-semibold">
-          + Nova Transação
-        </Button>
+        <Button onClick={openCreate} className="h-10 rounded-lg px-4 font-semibold">+ Nova Transação</Button>
       </div>
 
       <div className="flex flex-wrap items-center gap-3">
         <div className="flex items-center justify-between rounded-xl border border-border bg-card px-2 py-1.5">
-          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setSelectedMonth((prev) => new Date(prev.getFullYear(), prev.getMonth() - 1, 1))}>
-            <ChevronLeft className="h-4 w-4" />
-          </Button>
+          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setSelectedMonth((prev) => new Date(prev.getFullYear(), prev.getMonth() - 1, 1))}><ChevronLeft className="h-4 w-4" /></Button>
           <p className="min-w-[150px] text-center text-sm font-bold text-foreground">{capitalize(formatMonthYear(selectedMonth))}</p>
-          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setSelectedMonth((prev) => new Date(prev.getFullYear(), prev.getMonth() + 1, 1))}>
-            <ChevronRight className="h-4 w-4" />
-          </Button>
+          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setSelectedMonth((prev) => new Date(prev.getFullYear(), prev.getMonth() + 1, 1))}><ChevronRight className="h-4 w-4" /></Button>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          {[
-            { value: "all", label: "Todos", activeClass: "text-muted-foreground" },
-            { value: "income", label: "Receita", activeClass: "text-success" },
-            { value: "expense", label: "Despesa", activeClass: "text-destructive" },
-            { value: "transfer", label: "Transferência", activeClass: "text-info" },
-          ].map((option) => (
-            <button
-              key={option.value}
-              type="button"
-              onClick={() => setTypeFilter(option.value as "all" | "income" | "expense" | "transfer")}
-              className={cn("h-[38px] rounded-lg border border-border bg-secondary px-3 text-sm font-semibold", typeFilter === option.value ? option.activeClass : "text-muted-foreground")}
-            >
-              {option.label}
-            </button>
+          {[{ value: "all", label: "Todos", activeClass: "text-muted-foreground" }, { value: "income", label: "Receita", activeClass: "text-success" }, { value: "expense", label: "Despesa", activeClass: "text-destructive" }, { value: "transfer", label: "Transferência", activeClass: "text-info" }].map((option) => (
+            <button key={option.value} type="button" onClick={() => setTypeFilter(option.value as "all" | "income" | "expense" | "transfer")} className={cn("h-[38px] rounded-lg border border-border bg-secondary px-3 text-sm font-semibold", typeFilter === option.value ? option.activeClass : "text-muted-foreground")}>{option.label}</button>
           ))}
         </div>
 
-        <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-          <SelectTrigger className="h-[38px] w-[170px] rounded-lg border-border bg-secondary text-foreground"><SelectValue placeholder="Categoria" /></SelectTrigger>
-          <SelectContent className="border-border bg-card text-card-foreground">
-            <SelectItem value="all">Todas</SelectItem>
-            {categories.map((category) => (
-              <SelectItem key={category.id} value={category.id}>{category.name}</SelectItem>
-            ))}
-          </SelectContent>
+        <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value as StatusFilter)}>
+          <SelectTrigger className="h-[38px] w-[160px] rounded-lg border-border bg-secondary text-foreground"><SelectValue placeholder="Status" /></SelectTrigger>
+          <SelectContent className="border-border bg-card text-card-foreground"><SelectItem value="all">Todos</SelectItem><SelectItem value="paid">Pago</SelectItem><SelectItem value="pending">Pendente</SelectItem><SelectItem value="overdue">Atrasado</SelectItem></SelectContent>
         </Select>
 
-        <Select value={accountFilter} onValueChange={setAccountFilter}>
-          <SelectTrigger className="h-[38px] w-[170px] rounded-lg border-border bg-secondary text-foreground"><SelectValue placeholder="Conta" /></SelectTrigger>
-          <SelectContent className="border-border bg-card text-card-foreground">
-            <SelectItem value="all">Todas</SelectItem>
-            {accounts.map((account) => (
-              <SelectItem key={account.id} value={account.id}>{account.name}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-
-        <Select value={cardFilter} onValueChange={setCardFilter}>
-          <SelectTrigger className="h-[38px] w-[170px] rounded-lg border-border bg-secondary text-foreground"><SelectValue placeholder="Cartão" /></SelectTrigger>
-          <SelectContent className="border-border bg-card text-card-foreground">
-            <SelectItem value="all">Todos</SelectItem>
-            <SelectItem value="none">Sem cartão</SelectItem>
-            {cards.map((card) => (
-              <SelectItem key={card.id} value={card.id}>{card.name}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-
-        <Select value={memberFilter} onValueChange={setMemberFilter}>
-          <SelectTrigger className="h-[38px] w-[170px] rounded-lg border-border bg-secondary text-foreground"><SelectValue placeholder="Membro" /></SelectTrigger>
-          <SelectContent className="border-border bg-card text-card-foreground">
-            <SelectItem value="all">Todos</SelectItem>
-            {members.map((member) => (
-              <SelectItem key={member.user_id} value={member.user_id}>{member.profiles?.full_name || member.profiles?.email || "Usuário"}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <Select value={categoryFilter} onValueChange={setCategoryFilter}><SelectTrigger className="h-[38px] w-[170px] rounded-lg border-border bg-secondary text-foreground"><SelectValue placeholder="Categoria" /></SelectTrigger><SelectContent className="border-border bg-card text-card-foreground"><SelectItem value="all">Todas</SelectItem>{categories.map((category) => <SelectItem key={category.id} value={category.id}>{category.name}</SelectItem>)}</SelectContent></Select>
+        <Select value={accountFilter} onValueChange={setAccountFilter}><SelectTrigger className="h-[38px] w-[170px] rounded-lg border-border bg-secondary text-foreground"><SelectValue placeholder="Conta" /></SelectTrigger><SelectContent className="border-border bg-card text-card-foreground"><SelectItem value="all">Todas</SelectItem>{accounts.map((account) => <SelectItem key={account.id} value={account.id}>{account.name}</SelectItem>)}</SelectContent></Select>
+        <Select value={cardFilter} onValueChange={setCardFilter}><SelectTrigger className="h-[38px] w-[170px] rounded-lg border-border bg-secondary text-foreground"><SelectValue placeholder="Cartão" /></SelectTrigger><SelectContent className="border-border bg-card text-card-foreground"><SelectItem value="all">Todos</SelectItem><SelectItem value="none">Sem cartão</SelectItem>{cards.map((card) => <SelectItem key={card.id} value={card.id}>{card.name}</SelectItem>)}</SelectContent></Select>
+        <Select value={memberFilter} onValueChange={setMemberFilter}><SelectTrigger className="h-[38px] w-[170px] rounded-lg border-border bg-secondary text-foreground"><SelectValue placeholder="Membro" /></SelectTrigger><SelectContent className="border-border bg-card text-card-foreground"><SelectItem value="all">Todos</SelectItem>{members.map((member) => <SelectItem key={member.user_id} value={member.user_id}>{member.profiles?.full_name || member.profiles?.email || "Usuário"}</SelectItem>)}</SelectContent></Select>
       </div>
 
       <div className="flex flex-col gap-4 md:flex-row">
@@ -494,13 +541,14 @@ const TransactionsPage = () => {
           {loading ? (
             <div className="flex min-h-[300px] items-center justify-center text-sm text-muted-foreground">Carregando transações...</div>
           ) : filtered.length === 0 ? (
-            <div className="flex min-h-[300px] flex-col items-center justify-center gap-2 text-center"><ArrowLeftRight className="h-10 w-10 text-[hsl(var(--placeholder-icon))]" /><p className="text-base font-semibold text-foreground">Nenhuma transação encontrada</p><p className="text-sm text-muted-foreground">Adicione sua primeira transação</p><Button className="mt-2" onClick={() => setOpen(true)}>+ Nova Transação</Button></div>
+            <div className="flex min-h-[300px] flex-col items-center justify-center gap-2 text-center"><ArrowLeftRight className="h-10 w-10 text-[hsl(var(--placeholder-icon))]" /><p className="text-base font-semibold text-foreground">Nenhuma transação encontrada</p><p className="text-sm text-muted-foreground">Adicione sua primeira transação</p><Button className="mt-2" onClick={openCreate}>+ Nova Transação</Button></div>
           ) : (
             <>
               <Table>
-                <TableHeader><TableRow className="border-b border-border bg-background hover:bg-background"><TableHead className="h-11 px-4 text-xs font-semibold uppercase tracking-[0.5px] text-muted-foreground">Data</TableHead><TableHead className="h-11 px-4 text-xs font-semibold uppercase tracking-[0.5px] text-muted-foreground">Descrição</TableHead><TableHead className="h-11 px-4 text-xs font-semibold uppercase tracking-[0.5px] text-muted-foreground">Categoria</TableHead><TableHead className="h-11 px-4 text-xs font-semibold uppercase tracking-[0.5px] text-muted-foreground">Valor</TableHead><TableHead className="h-11 px-4 text-xs font-semibold uppercase tracking-[0.5px] text-muted-foreground">Conta</TableHead><TableHead className="h-11 px-4 text-xs font-semibold uppercase tracking-[0.5px] text-muted-foreground">Membro</TableHead></TableRow></TableHeader>
+                <TableHeader><TableRow className="border-b border-border bg-background hover:bg-background"><TableHead className="h-11 px-4 text-xs font-semibold uppercase tracking-[0.5px] text-muted-foreground">Data</TableHead><TableHead className="h-11 px-4 text-xs font-semibold uppercase tracking-[0.5px] text-muted-foreground">Descrição</TableHead><TableHead className="h-11 px-4 text-xs font-semibold uppercase tracking-[0.5px] text-muted-foreground">Categoria</TableHead><TableHead className="h-11 px-4 text-xs font-semibold uppercase tracking-[0.5px] text-muted-foreground">Valor</TableHead><TableHead className="h-11 px-4 text-xs font-semibold uppercase tracking-[0.5px] text-muted-foreground">Conta</TableHead><TableHead className="h-11 px-4 text-xs font-semibold uppercase tracking-[0.5px] text-muted-foreground">Membro</TableHead><TableHead className="h-11 px-4 text-xs font-semibold uppercase tracking-[0.5px] text-muted-foreground text-right">Ações</TableHead></TableRow></TableHeader>
                 <TableBody>
                   {pageRows.map((tx) => {
+                    const computedStatus = getComputedStatus(tx);
                     const category = asSingle(tx.categories);
                     const account = asSingle(tx.accounts);
                     const card = asSingle(tx.cards);
@@ -508,25 +556,30 @@ const TransactionsPage = () => {
                     const member = tx.user_id ? memberMap.get(tx.user_id) : null;
                     const memberName = member?.name || profileJoined?.full_name?.split(" ")[0] || "Usuário";
                     const memberInitials = member?.initials || memberName.slice(0, 1).toUpperCase();
-                    const installmentCurrent = tx.installment_number ?? tx.installment_current ?? tx.current_installment ?? null;
-                    const installmentTotal = tx.installments ?? tx.installment_total ?? tx.total_installments ?? null;
-                    const installmentLabel = installmentCurrent && installmentTotal ? ` (${installmentCurrent}/${installmentTotal})` : "";
+                    const installmentLabel = tx.installment_current && tx.installment_total ? ` (${tx.installment_current}/${tx.installment_total})` : "";
                     const valuePrefix = tx.type === "income" ? "+" : tx.type === "expense" ? "-" : "";
                     const valueColor = tx.type === "income" ? "text-success" : tx.type === "expense" ? "text-destructive" : "text-info";
+
                     return (
-                      <TableRow key={tx.id} className="cursor-pointer border-b border-border bg-transparent hover:bg-secondary">
+                      <TableRow key={tx.id} className="group cursor-pointer border-b border-border bg-transparent hover:bg-secondary" onClick={() => openEdit(tx)}>
                         <TableCell className="px-4 py-3 text-sm text-muted-foreground">{formatDateDDMM(tx.date)}</TableCell>
                         <TableCell className="px-4 py-3 text-sm font-medium text-foreground"><span>{tx.description || "Sem descrição"}</span>{installmentLabel && <span className="text-muted-foreground">{installmentLabel}</span>}</TableCell>
                         <TableCell className="px-4 py-3 text-sm text-muted-foreground"><div className="flex items-center gap-2"><span className="h-2 w-2 rounded-full" style={{ backgroundColor: category?.color || "hsl(var(--muted-foreground))" }} />{category?.name || "Sem categoria"}</div></TableCell>
-                        <TableCell className={cn("px-4 py-3 text-sm font-semibold tabular-nums", valueColor)}>{valuePrefix}{ptCurrency.format(Number(tx.amount || 0))}</TableCell>
+                        <TableCell className={cn("px-4 py-3 text-sm font-semibold tabular-nums", valueColor)}>
+                          {computedStatus !== "paid" && (
+                            <span className={cn("mr-2 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold", computedStatus === "overdue" ? "bg-destructive/20 text-destructive" : "bg-warning/20 text-warning")}>{computedStatus === "overdue" ? "Atrasado" : "Pendente"}</span>
+                          )}
+                          {valuePrefix}
+                          {ptCurrency.format(Number(tx.amount || 0))}
+                        </TableCell>
                         <TableCell className="px-4 py-3 text-sm text-muted-foreground">{tx.card_id ? <span className="inline-flex items-center gap-1"><CreditCard className="h-3.5 w-3.5" />{card?.name || "Cartão"}</span> : account?.name || "Sem conta"}</TableCell>
                         <TableCell className="px-4 py-3 text-sm text-muted-foreground"><span className="inline-flex items-center gap-2"><span className="flex h-6 w-6 items-center justify-center rounded-full bg-secondary text-[11px] font-bold text-foreground">{memberInitials}</span><span className="text-foreground">{memberName}</span></span></TableCell>
+                        <TableCell className="px-4 py-3"><div className="flex justify-end gap-2 opacity-0 transition-opacity group-hover:opacity-100"><button type="button" className="text-muted-foreground hover:text-foreground" onClick={(e) => { e.stopPropagation(); openEdit(tx); }}><Pencil className="h-4 w-4" /></button>{computedStatus !== "paid" && <button type="button" className="text-muted-foreground hover:text-success" onClick={(e) => { e.stopPropagation(); void markPaid(tx); }}><CheckCircle className="h-4 w-4" /></button>}<button type="button" className="text-muted-foreground hover:text-foreground" onClick={(e) => { e.stopPropagation(); openDelete(tx); }}><Trash2 className="h-4 w-4" /></button></div></TableCell>
                       </TableRow>
                     );
                   })}
                 </TableBody>
               </Table>
-
               <div className="flex items-center justify-between border-t border-border px-4 py-3 text-sm text-muted-foreground"><p>Mostrando {filtered.length === 0 ? 0 : startIndex + 1}-{endIndex} de {filtered.length}</p><div className="flex items-center gap-2"><Button variant="outline" className="h-8 rounded-lg border-border bg-secondary" onClick={() => setPage((prev) => Math.max(prev - 1, 1))} disabled={currentPage <= 1}>Anterior</Button><Button variant="outline" className="h-8 rounded-lg border-border bg-secondary" onClick={() => setPage((prev) => Math.min(prev + 1, pageCount))} disabled={currentPage >= pageCount}>Próxima</Button></div></div>
             </>
           )}
@@ -534,61 +587,56 @@ const TransactionsPage = () => {
       </Card>
 
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-h-[90vh] max-w-[520px] overflow-y-auto rounded-2xl border-border bg-card p-6 shadow-2xl backdrop-blur-sm">
-          <DialogHeader>
-            <DialogTitle className="text-xl font-bold text-foreground">Nova Transação</DialogTitle>
-          </DialogHeader>
-
+        <DialogContent className="max-h-[90vh] max-w-[520px] overflow-y-auto rounded-2xl border-border bg-card p-6 shadow-2xl">
+          <DialogHeader><DialogTitle className="text-xl font-bold text-foreground">{editing ? "Editar Transação" : "Nova Transação"}</DialogTitle></DialogHeader>
           <div className="space-y-4">
             <div className="grid grid-cols-3 gap-2">
-              <button type="button" onClick={() => setFormType("income")} className={cn("h-10 rounded-lg border text-sm font-semibold", formType === "income" ? "border-success bg-success/15 text-success" : "border-success/60 text-success/80")}><span className="inline-flex items-center gap-1"><TrendingUp className="h-4 w-4" />Receita</span></button>
-              <button type="button" onClick={() => setFormType("expense")} className={cn("h-10 rounded-lg border text-sm font-semibold", formType === "expense" ? "border-destructive bg-destructive/15 text-destructive" : "border-destructive/60 text-destructive/80")}><span className="inline-flex items-center gap-1"><TrendingDown className="h-4 w-4" />Despesa</span></button>
-              <button type="button" onClick={() => setFormType("transfer")} className={cn("h-10 rounded-lg border text-sm font-semibold", formType === "transfer" ? "border-info bg-info/15 text-info" : "border-info/60 text-info/80")}><span className="inline-flex items-center gap-1"><ArrowLeftRight className="h-4 w-4" />Transferência</span></button>
+              {[{ key: "income", label: "Receita", icon: TrendingUp, active: "border-success bg-success/15 text-success", inactive: "border-success/60 text-success/80" }, { key: "expense", label: "Despesa", icon: TrendingDown, active: "border-destructive bg-destructive/15 text-destructive", inactive: "border-destructive/60 text-destructive/80" }, { key: "transfer", label: "Transferência", icon: ArrowLeftRight, active: "border-info bg-info/15 text-info", inactive: "border-info/60 text-info/80" }].map((item) => (<button key={item.key} type="button" disabled={Boolean(editing)} onClick={() => setFormType(item.key as "income" | "expense" | "transfer")} className={cn("h-10 rounded-lg border text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60", formType === item.key ? item.active : item.inactive)}><span className="inline-flex items-center gap-1"><item.icon className="h-4 w-4" />{item.label}</span></button>))}
             </div>
 
+            {editing?.is_installment && editing.installment_current && editing.installment_total && (
+              <div className="space-y-2 rounded-lg border border-border bg-secondary/40 p-3"><p className="text-sm text-foreground">Parcela {editing.installment_current} de {editing.installment_total}</p><div className="flex items-center justify-between"><Label className="text-sm text-foreground">Editar todas as parcelas?</Label><Switch checked={editAllInstallments} onCheckedChange={setEditAllInstallments} /></div></div>
+            )}
+
             <div className="space-y-2"><Label className="text-xs text-muted-foreground">Descrição</Label><Input value={description} onChange={(e) => setDescription(e.target.value.slice(0, 120))} placeholder="Ex: Supermercado, Salário, Aluguel..." className="h-[42px] rounded-lg border-border bg-secondary text-foreground" /></div>
-
-            <div className="space-y-2"><Label className="text-xs text-muted-foreground">Valor</Label><div className="relative"><span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm font-semibold text-muted-foreground">R$</span><Input inputMode="numeric" value={amountDisplay.replace("R$", "").trim()} onChange={(e) => setAmountDigits(e.target.value.replace(/\D/g, "").slice(0, 12))} placeholder="0,00" className="h-[42px] rounded-lg border-border bg-secondary pl-11 text-lg font-semibold text-foreground" /></div></div>
-
+            <div className="space-y-2"><Label className="text-xs text-muted-foreground">Valor</Label><div className="relative"><span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm font-semibold text-muted-foreground">R$</span><Input inputMode="numeric" value={amountDisplay.replace("R$", "").trim()} onChange={(e) => setAmountDigits(e.target.value.replace(/\D/g, "").slice(0, 12))} className="h-[42px] rounded-lg border-border bg-secondary pl-11 text-lg font-semibold text-foreground" /></div></div>
             <div className="space-y-2"><Label className="text-xs text-muted-foreground">Data</Label><Popover><PopoverTrigger asChild><Button type="button" variant="outline" className="h-[42px] w-full justify-start rounded-lg border-border bg-secondary text-left font-normal"><CalendarIcon className="mr-2 h-4 w-4" />{date.toLocaleDateString("pt-BR")}</Button></PopoverTrigger><PopoverContent align="start" className="w-auto border-border bg-card p-0"><Calendar mode="single" selected={date} onSelect={(value) => value && setDate(value)} initialFocus className="p-3 pointer-events-auto" /></PopoverContent></Popover></div>
+            <div className="space-y-2"><Label className="text-xs text-muted-foreground">Status</Label><Select value={status} onValueChange={(value) => setStatus(value as "paid" | "pending")}><SelectTrigger className="h-[42px] rounded-lg border-border bg-secondary text-foreground"><SelectValue /></SelectTrigger><SelectContent className="border-border bg-card text-card-foreground"><SelectItem value="paid">Pago</SelectItem><SelectItem value="pending">Pendente</SelectItem></SelectContent></Select></div>
 
             {formType !== "transfer" && (
-              <div className="space-y-2"><Label className="text-xs text-muted-foreground">Categoria</Label>{filteredCategories.length ? <Select value={categoryId || "none"} onValueChange={(value) => setCategoryId(value === "none" ? "" : value)}><SelectTrigger className="h-[42px] rounded-lg border-border bg-secondary text-foreground"><SelectValue placeholder="Selecione" /></SelectTrigger><SelectContent className="border-border bg-card text-card-foreground">{filteredCategories.map((category) => (<SelectItem key={category.id} value={category.id}><span className="inline-flex items-center gap-2"><span className="h-2 w-2 rounded-full" style={{ backgroundColor: category.color || "hsl(var(--muted-foreground))" }} />{category.icon ? `${category.icon} ` : ""}{category.name}</span></SelectItem>))}</SelectContent></Select> : <p className="text-sm text-muted-foreground">Nenhuma categoria. <button type="button" className="text-primary hover:underline">Criar categoria</button></p>}</div>
+              <div className="space-y-2"><Label className="text-xs text-muted-foreground">Categoria</Label>{filteredCategories.length ? <Select value={categoryId || "none"} onValueChange={(value) => setCategoryId(value === "none" ? "" : value)}><SelectTrigger className="h-[42px] rounded-lg border-border bg-secondary text-foreground"><SelectValue placeholder="Selecione" /></SelectTrigger><SelectContent className="border-border bg-card text-card-foreground">{filteredCategories.map((category) => <SelectItem key={category.id} value={category.id}><span className="inline-flex items-center gap-2"><span className="h-2 w-2 rounded-full" style={{ backgroundColor: category.color || "hsl(var(--muted-foreground))" }} />{category.icon ? `${category.icon} ` : ""}{category.name}</span></SelectItem>)}</SelectContent></Select> : <p className="text-sm text-muted-foreground">Nenhuma categoria</p>}</div>
             )}
 
             {formType === "transfer" ? (
-              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                <div className="space-y-2"><Label className="text-xs text-muted-foreground">De (conta origem)</Label><Select value={fromAccountId || "none"} onValueChange={(value) => setFromAccountId(value === "none" ? "" : value)}><SelectTrigger className="h-[42px] rounded-lg border-border bg-secondary text-foreground"><SelectValue placeholder="Selecione" /></SelectTrigger><SelectContent className="border-border bg-card text-card-foreground">{accounts.map((account) => (<SelectItem key={account.id} value={account.id}>{account.name}{account.institution ? ` • ${account.institution}` : ""}</SelectItem>))}</SelectContent></Select></div>
-                <div className="space-y-2"><Label className="text-xs text-muted-foreground">Para (conta destino)</Label><Select value={toAccountId || "none"} onValueChange={(value) => setToAccountId(value === "none" ? "" : value)}><SelectTrigger className="h-[42px] rounded-lg border-border bg-secondary text-foreground"><SelectValue placeholder="Selecione" /></SelectTrigger><SelectContent className="border-border bg-card text-card-foreground">{accounts.map((account) => (<SelectItem key={account.id} value={account.id}>{account.name}{account.institution ? ` • ${account.institution}` : ""}</SelectItem>))}</SelectContent></Select></div>
-              </div>
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-2"><div className="space-y-2"><Label className="text-xs text-muted-foreground">De (conta origem)</Label><Select value={fromAccountId || "none"} onValueChange={(value) => setFromAccountId(value === "none" ? "" : value)}><SelectTrigger className="h-[42px] rounded-lg border-border bg-secondary text-foreground"><SelectValue placeholder="Selecione" /></SelectTrigger><SelectContent className="border-border bg-card text-card-foreground">{accounts.map((account) => <SelectItem key={account.id} value={account.id}>{account.name}</SelectItem>)}</SelectContent></Select></div><div className="space-y-2"><Label className="text-xs text-muted-foreground">Para (conta destino)</Label><Select value={toAccountId || "none"} onValueChange={(value) => setToAccountId(value === "none" ? "" : value)}><SelectTrigger className="h-[42px] rounded-lg border-border bg-secondary text-foreground"><SelectValue placeholder="Selecione" /></SelectTrigger><SelectContent className="border-border bg-card text-card-foreground">{accounts.map((account) => <SelectItem key={account.id} value={account.id}>{account.name}</SelectItem>)}</SelectContent></Select></div></div>
             ) : formType === "expense" ? (
               <>
-                <div className="space-y-2"><Label className="text-xs text-muted-foreground">Cartão (opcional)</Label><Select value={cardId} onValueChange={setCardId}><SelectTrigger className="h-[42px] rounded-lg border-border bg-secondary text-foreground"><SelectValue /></SelectTrigger><SelectContent className="border-border bg-card text-card-foreground"><SelectItem value="none">Sem cartão</SelectItem>{cards.map((card) => (<SelectItem key={card.id} value={card.id}>{card.name}{card.last4 ? ` • **** ${card.last4}` : ""}{card.brand ? ` • ${card.brand}` : ""}</SelectItem>))}</SelectContent></Select></div>
-                {cardId === "none" && <div className="space-y-2"><Label className="text-xs text-muted-foreground">Conta</Label><Select value={accountId || "none"} onValueChange={(value) => setAccountId(value === "none" ? "" : value)}><SelectTrigger className="h-[42px] rounded-lg border-border bg-secondary text-foreground"><SelectValue placeholder="Selecione" /></SelectTrigger><SelectContent className="border-border bg-card text-card-foreground">{accounts.map((account) => (<SelectItem key={account.id} value={account.id}>{account.name}{account.institution ? ` • ${account.institution}` : ""}</SelectItem>))}</SelectContent></Select></div>}
+                <div className="space-y-2"><Label className="text-xs text-muted-foreground">Cartão (opcional)</Label><Select value={cardId} onValueChange={setCardId}><SelectTrigger className="h-[42px] rounded-lg border-border bg-secondary text-foreground"><SelectValue /></SelectTrigger><SelectContent className="border-border bg-card text-card-foreground"><SelectItem value="none">Sem cartão</SelectItem>{cards.map((card) => <SelectItem key={card.id} value={card.id}>{card.name}</SelectItem>)}</SelectContent></Select></div>
+                {cardId === "none" && <div className="space-y-2"><Label className="text-xs text-muted-foreground">Conta</Label><Select value={accountId || "none"} onValueChange={(value) => setAccountId(value === "none" ? "" : value)}><SelectTrigger className="h-[42px] rounded-lg border-border bg-secondary text-foreground"><SelectValue placeholder="Selecione" /></SelectTrigger><SelectContent className="border-border bg-card text-card-foreground">{accounts.map((account) => <SelectItem key={account.id} value={account.id}>{account.name}</SelectItem>)}</SelectContent></Select></div>}
               </>
             ) : (
-              <div className="space-y-2"><Label className="text-xs text-muted-foreground">Conta</Label><Select value={accountId || "none"} onValueChange={(value) => setAccountId(value === "none" ? "" : value)}><SelectTrigger className="h-[42px] rounded-lg border-border bg-secondary text-foreground"><SelectValue placeholder="Selecione" /></SelectTrigger><SelectContent className="border-border bg-card text-card-foreground">{accounts.map((account) => (<SelectItem key={account.id} value={account.id}>{account.name}{account.institution ? ` • ${account.institution}` : ""}</SelectItem>))}</SelectContent></Select></div>
+              <div className="space-y-2"><Label className="text-xs text-muted-foreground">Conta</Label><Select value={accountId || "none"} onValueChange={(value) => setAccountId(value === "none" ? "" : value)}><SelectTrigger className="h-[42px] rounded-lg border-border bg-secondary text-foreground"><SelectValue placeholder="Selecione" /></SelectTrigger><SelectContent className="border-border bg-card text-card-foreground">{accounts.map((account) => <SelectItem key={account.id} value={account.id}>{account.name}</SelectItem>)}</SelectContent></Select></div>
             )}
 
-            {formType === "expense" && (
-              <>
-                <div className="flex items-center justify-between rounded-lg border border-border bg-secondary/40 p-3"><Label htmlFor="parcelado" className="text-sm text-foreground">Parcelado?</Label><Switch id="parcelado" checked={isInstallment} onCheckedChange={(checked) => { setIsInstallment(checked); if (checked) setIsRecurring(false); }} /></div>
-                {isInstallment ? (
-                  <div className="space-y-2"><Label className="text-xs text-muted-foreground">Número de parcelas</Label><Input type="number" min={2} max={48} value={installments} onChange={(e) => setInstallments(Math.max(2, Math.min(48, Number(e.target.value || 2))))} className="h-[42px] rounded-lg border-border bg-secondary text-foreground" /><p className="text-sm text-muted-foreground">{installmentPreview}</p></div>
-                ) : (
-                  <>
-                    <div className="flex items-center justify-between rounded-lg border border-border bg-secondary/40 p-3"><Label htmlFor="recorrente" className="text-sm text-foreground">Recorrente?</Label><Switch id="recorrente" checked={isRecurring} onCheckedChange={setIsRecurring} /></div>
-                    {isRecurring && <div className="space-y-2"><Label className="text-xs text-muted-foreground">Frequência</Label><Select value={recurrenceType} onValueChange={(value: RecurrenceType) => setRecurrenceType(value)}><SelectTrigger className="h-[42px] rounded-lg border-border bg-secondary text-foreground"><SelectValue /></SelectTrigger><SelectContent className="border-border bg-card text-card-foreground"><SelectItem value="weekly">Semanal</SelectItem><SelectItem value="monthly">Mensal</SelectItem><SelectItem value="yearly">Anual</SelectItem></SelectContent></Select></div>}
-                  </>
-                )}
-              </>
-            )}
-
-            <div className="space-y-2"><Label className="text-xs text-muted-foreground">Notas (opcional)</Label><Textarea value={notes} onChange={(e) => setNotes(e.target.value.slice(0, 600))} placeholder="Observações..." rows={3} className="resize-y rounded-lg border-border bg-secondary text-foreground" /></div>
+            <div className="space-y-2"><Label className="text-xs text-muted-foreground">Notas</Label><Textarea value={notes} onChange={(e) => setNotes(e.target.value.slice(0, 600))} rows={3} className="resize-y rounded-lg border-border bg-secondary text-foreground" /></div>
             {formError && <p className="text-sm text-destructive">{formError}</p>}
 
-            <div className="flex items-center justify-end gap-2 pt-2"><Button variant="outline" className="h-10 rounded-lg border-border bg-secondary text-muted-foreground" onClick={() => { setOpen(false); resetForm(); }}>Cancelar</Button><Button className="h-10 rounded-lg px-4 font-semibold" onClick={saveTransaction} disabled={!canSave || saving}>{saving ? <><Loader2 className="h-4 w-4 animate-spin" />Salvando...</> : "Salvar"}</Button></div>
+            <div className="flex items-center justify-between gap-2 pt-2">
+              {editing ? <Button variant="destructive" className="h-10 rounded-lg" onClick={() => openDelete(editing)}>Excluir</Button> : <span />}
+              <div className="flex items-center gap-2"><Button variant="outline" className="h-10 rounded-lg border-border bg-secondary text-muted-foreground" onClick={() => { setOpen(false); resetForm(); }}>Cancelar</Button><Button className="h-10 rounded-lg px-4 font-semibold" onClick={persist} disabled={!canSave || saving}>{saving ? <><Loader2 className="h-4 w-4 animate-spin" />Salvando...</> : editing ? "Salvar alterações" : "Salvar"}</Button></div>
+            </div>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+        <DialogContent className="max-w-md rounded-xl border-border bg-card">
+          <DialogHeader><DialogTitle className="text-lg font-bold text-foreground">Excluir transação</DialogTitle></DialogHeader>
+          {!deleteTarget?.installment_group_id ? (
+            <div className="space-y-4"><p className="text-sm text-muted-foreground">Tem certeza que deseja excluir esta transação?</p><div className="flex justify-end gap-2"><Button variant="outline" className="border-border bg-secondary" onClick={() => setDeleteOpen(false)}>Cancelar</Button><Button variant="destructive" onClick={() => void executeDelete("one")}>Excluir</Button></div></div>
+          ) : (
+            <div className="space-y-3"><p className="text-sm text-muted-foreground">Escolha como excluir esta transação parcelada:</p><Button variant="outline" className="w-full justify-start border-border bg-secondary" onClick={() => void executeDelete("one")}>Excluir só esta parcela</Button><Button variant="outline" className="w-full justify-start border-border bg-secondary" onClick={() => void executeDelete("remaining")}>Excluir todas as parcelas restantes</Button><Button variant="destructive" className="w-full justify-start" onClick={() => void executeDelete("all")}>Excluir todas as parcelas</Button><Button variant="ghost" className="w-full" onClick={() => setDeleteOpen(false)}>Cancelar</Button></div>
+          )}
         </DialogContent>
       </Dialog>
     </div>
