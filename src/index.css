@@ -85,13 +85,14 @@
     --shadow-card-hover: 0 4px 12px rgba(0, 0, 0, 0.08), 0 2px 4px rgba(0, 0, 0, 0.04);
     --gradient-accent: linear-gradient(135deg, hsl(160 84% 39%), hsl(160 84% 32%));
 
-    /* Glassmorphism */
-    --glass-bg: 255 255 255 / 0.5;
-    --glass-bg-strong: 255 255 255 / 0.72;
-    --glass-border: 0 0 0 / 0.06;
-    --glass-blur: 24px;
-    --glow-1: 160 84% 55%;            /* emerald glow */
-    --glow-2: 168 64% 40%;            /* teal glow */
+    /* Glassmorphism — clean, subtle */
+    --glass-bg: 0 0% 100% / 0.65;
+    --glass-bg-strong: 0 0% 100% / 0.85;
+    --glass-border: 220 13% 91% / 0.8;
+    --glass-blur: 18px;
+    --glass-shadow: 0 1px 2px rgba(15, 62, 60, 0.04), 0 4px 16px rgba(15, 62, 60, 0.06);
+    --glow-1: 160 60% 80%;            /* very soft mint wash */
+    --glow-2: 168 30% 92%;            /* near-white teal */
   }
 
   .dark {
@@ -159,13 +160,14 @@
     --shadow-card-hover: 0 4px 12px rgba(0, 0, 0, 0.4);
     --gradient-accent: linear-gradient(135deg, hsl(160 84% 39%), hsl(158 64% 52%));
 
-    /* Glassmorphism (dark) — light tint over dark gradient body */
-    --glass-bg: 255 255 255 / 0.04;
-    --glass-bg-strong: 255 255 255 / 0.07;
-    --glass-border: 255 255 255 / 0.10;
-    --glass-blur: 24px;
-    --glow-1: 160 84% 40%;
-    --glow-2: 168 60% 28%;
+    /* Glassmorphism (dark) — soft light tint, very subtle background */
+    --glass-bg: 0 0% 100% / 0.045;
+    --glass-bg-strong: 0 0% 100% / 0.07;
+    --glass-border: 0 0% 100% / 0.08;
+    --glass-blur: 18px;
+    --glass-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 6px 20px rgba(0, 0, 0, 0.25);
+    --glow-1: 160 70% 22%;
+    --glow-2: 168 50% 14%;
   }
 }
 
@@ -184,9 +186,8 @@
   body {
     background-color: hsl(var(--background));
     background-image:
-      radial-gradient(60vw 60vh at 8% 0%, hsl(var(--glow-1) / 0.35), transparent 60%),
-      radial-gradient(50vw 70vh at 100% 100%, hsl(var(--glow-2) / 0.40), transparent 55%),
-      radial-gradient(70vw 70vh at 50% 50%, hsl(var(--glow-1) / 0.10), transparent 70%);
+      radial-gradient(80vw 60vh at 100% 0%, hsl(var(--glow-1) / 0.25), transparent 60%),
+      radial-gradient(60vw 50vh at 0% 100%, hsl(var(--glow-2) / 0.20), transparent 65%);
     background-attachment: fixed;
     min-height: 100vh;
   }
@@ -202,35 +203,39 @@
 
 @layer components {
   .glass {
-    background-color: rgb(var(--glass-bg));
+    background-color: hsl(var(--glass-bg));
     backdrop-filter: blur(var(--glass-blur)) saturate(140%);
     -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(140%);
-    border: 1px solid rgb(var(--glass-border));
+    border: 1px solid hsl(var(--glass-border));
+    box-shadow: var(--glass-shadow);
   }
 
   .glass-strong {
-    background-color: rgb(var(--glass-bg-strong));
+    background-color: hsl(var(--glass-bg-strong));
     backdrop-filter: blur(var(--glass-blur)) saturate(160%);
     -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(160%);
-    border: 1px solid rgb(var(--glass-border));
+    border: 1px solid hsl(var(--glass-border));
   }
 }
 
-/* Promote any element with bg-card to glass (without affecting bg-brandDark, bg-secondary etc.) */
+/* Promote any element with bg-card to glass — clean, with subtle shadow */
 @layer utilities {
   .bg-card {
-    background-color: rgb(var(--glass-bg)) !important;
+    background-color: hsl(var(--glass-bg)) !important;
     backdrop-filter: blur(var(--glass-blur)) saturate(140%);
     -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(140%);
+    box-shadow: var(--glass-shadow);
+    border-color: hsl(var(--glass-border));
   }
   .bg-popover {
-    background-color: rgb(var(--glass-bg-strong)) !important;
-    backdrop-filter: blur(var(--glass-blur)) saturate(160%);
-    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(160%);
+    background-color: hsl(var(--glass-bg-strong)) !important;
+    backdrop-filter: blur(calc(var(--glass-blur) + 4px)) saturate(160%);
+    -webkit-backdrop-filter: blur(calc(var(--glass-blur) + 4px)) saturate(160%);
+    box-shadow: var(--glass-shadow);
   }
   .bg-sidebar {
-    background-color: rgb(var(--glass-bg-strong)) !important;
-    backdrop-filter: blur(var(--glass-blur)) saturate(160%);
-    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(160%);
+    background-color: hsl(var(--glass-bg-strong)) !important;
+    backdrop-filter: blur(calc(var(--glass-blur) + 2px)) saturate(160%);
+    -webkit-backdrop-filter: blur(calc(var(--glass-blur) + 2px)) saturate(160%);
   }
 }
