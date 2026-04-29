@@ -273,12 +273,12 @@ const SchedulePage = () => {
       supabase
         .from("scheduled_payments")
         .select("*")
-        .or("is_paid.eq.false,status.eq.pending,status.is.null")
+        .eq("is_paid", false)
         .lt("due_date", todayIso()),
       supabase
         .from("scheduled_payments")
         .select("*")
-        .or("is_paid.eq.false,status.eq.pending,status.is.null")
+        .eq("is_paid", false)
         .gte("due_date", todayIso())
         .lte("due_date", nextWeek),
       supabase.from("categories").select("id, name, color, type").order("name", { ascending: true }),
