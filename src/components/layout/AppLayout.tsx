@@ -114,14 +114,14 @@ export const AppLayout = () => {
           cn(
             "relative mx-3 flex items-center gap-3 rounded-[10px] px-3 py-2.5 text-sm font-medium transition-all duration-200",
             isActive
-              ? "bg-sidebar-accent text-sidebar-accent-foreground before:absolute before:left-[-12px] before:top-1/2 before:h-1.5 before:w-1.5 before:-translate-y-1/2 before:rounded-full before:bg-primary"
-              : "text-muted-foreground hover:bg-[hsl(var(--sidebar-hover-bg))] hover:text-[hsl(var(--sidebar-hover-foreground))]",
+              ? "bg-sidebar-accent text-sidebar-accent-foreground before:absolute before:left-[-12px] before:top-1/2 before:h-1.5 before:w-1.5 before:-translate-y-1/2 before:rounded-full before:bg-sidebar-primary"
+              : "text-sidebar-foreground/85 hover:bg-[hsl(var(--sidebar-hover-bg))] hover:text-sidebar-foreground",
           )
         }
       >
         {({ isActive }) => (
           <>
-            <item.icon className={cn("h-5 w-5 shrink-0 transition-colors duration-200", isActive ? "text-primary" : "text-muted-foreground group-hover:text-foreground")} />
+            <item.icon className={cn("h-5 w-5 shrink-0 transition-colors duration-200", isActive ? "text-sidebar-primary" : "text-sidebar-foreground/85 group-hover:text-sidebar-foreground")} />
             {!isCollapsed && <span className="truncate">{item.label}</span>}
           </>
         )}
@@ -155,7 +155,7 @@ export const AppLayout = () => {
 
       <aside
         className={cn(
-          "fixed inset-y-0 left-0 z-40 flex flex-col border-r border-border/60 bg-sidebar transition-all duration-300",
+          "fixed inset-y-0 left-0 z-40 flex flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground transition-all duration-300",
           isMobile ? "w-[260px]" : "",
           isMobile ? (mobileOpen ? "translate-x-0" : "-translate-x-full") : "translate-x-0",
         )}
@@ -172,7 +172,7 @@ export const AppLayout = () => {
               variant="ghost"
               size="icon"
               onClick={() => setCollapsed((prev) => !prev)}
-              className="absolute right-3 h-8 w-8 rounded-md text-muted-foreground hover:bg-[hsl(var(--sidebar-hover-bg))] hover:text-foreground"
+              className="absolute right-3 h-8 w-8 rounded-md text-sidebar-foreground/70 hover:bg-[hsl(var(--sidebar-hover-bg))] hover:text-sidebar-foreground"
               aria-label={isCollapsed ? "Expandir sidebar" : "Recolher sidebar"}
             >
               {isCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
@@ -186,7 +186,7 @@ export const AppLayout = () => {
           <div className="mx-3 my-3 h-px bg-border" />
 
           <div className="space-y-1">
-            {!isCollapsed && <p className="px-4 pb-1 text-xs font-semibold uppercase tracking-normal text-[hsl(var(--section-label))]">Extras</p>}
+            {!isCollapsed && <p className="px-4 pb-1 text-xs font-semibold uppercase tracking-wider text-sidebar-foreground/55">Extras</p>}
             {EXTRA_ITEMS.map(renderMenuItem)}
           </div>
 
@@ -197,7 +197,7 @@ export const AppLayout = () => {
       </aside>
 
       <div className="transition-all duration-300" style={{ marginLeft: isMobile ? "0px" : desktopSidebarWidth }}>
-        <header className="glass-strong sticky top-0 z-20 flex h-16 items-center justify-between border-b border-border/60 px-6">
+        <header className="sticky top-0 z-20 flex h-16 items-center justify-between border-b border-border/40 bg-transparent px-6 backdrop-blur-sm">
           <div className="flex items-center gap-3">
             {isMobile && (
               <Button
