@@ -161,7 +161,7 @@ export const AppLayout = () => {
         )}
         style={{ width: isMobile ? "260px" : desktopSidebarWidth }}
       >
-        <div className="relative flex h-16 items-center px-4">
+        <div className="relative flex h-16 items-center border-b border-sidebar-border bg-[hsl(var(--sidebar-header-bg))] px-4">
           <div className={cn("flex items-center", isCollapsed ? "justify-center" : "gap-2.5")}>
             <img src={sidebarLogo} alt="Finance Family" className="h-9 w-9 rounded-md object-cover" />
             {!isCollapsed && <span className="text-lg font-bold text-primary">Finance Family</span>}

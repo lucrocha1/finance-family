@@ -57,8 +57,99 @@ type ScheduledRow = {
   paid_at: string | null;
   categories?: CategoryRow | CategoryRow[] | null;
   created_at: string | null;
-  source?: "scheduled" | "transaction" | "debt";
+  source?: "scheduled" | "transaction" | "debt" | "card_closing" | "card_due";
   source_id?: string;
+};
+
+const buildCardEvents = (
+  cards: Array<{ id: string; name: string; closing_day: number | null; due_day: number | null }>,
+  cardTransactions: Array<{ card_id: string | null; amount: number; date: string }>,
+  monthStart: Date,
+  monthEnd: Date,
+): ScheduledRow[] => {
+  const events: ScheduledRow[] = [];
+  const clampDay = (y: number, m: number, d: number) => {
+    const last = new Date(y, m + 1, 0).getDate();
+    return new Date(y, m, Math.min(d, last));
+  };
+
+  cards.forEach((card) => {
+    const closingDay = Number(card.closing_day || 0);
+    const dueDay = Number(card.due_day || 0);
+    if (!closingDay || !dueDay) return;
+
+    // Generate closing + due events for THIS month and NEXT month, then filter into the requested range
+    const candidates: Date[] = [
+      new Date(monthStart.getFullYear(), monthStart.getMonth(), 1),
+      new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 1),
+      new Date(monthStart.getFullYear(), monthStart.getMonth() - 1, 1),
+    ];
+
+    candidates.forEach((monthRef) => {
+      const closingDate = clampDay(monthRef.getFullYear(), monthRef.getMonth(), closingDay);
+      const dueOffset = dueDay >= closingDay ? 0 : 1;
+      const dueDate = clampDay(monthRef.getFullYear(), monthRef.getMonth() + dueOffset, dueDay);
+
+      // Cycle of THIS closing: previous closing day + 1 → closingDate
+      const prevClosing = clampDay(monthRef.getFullYear(), monthRef.getMonth() - 1, closingDay);
+      const cycleStart = new Date(prevClosing);
+      cycleStart.setDate(cycleStart.getDate() + 1);
+      const cycleStartIso = toISODate(cycleStart);
+      const cycleEndIso = toISODate(closingDate);
+      const total = cardTransactions
+        .filter((tx) => tx.card_id === card.id && tx.date >= cycleStartIso && tx.date <= cycleEndIso)
+        .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+
+      const closingIso = toISODate(closingDate);
+      const dueIso = toISODate(dueDate);
+
+      if (closingIso >= toISODate(monthStart) && closingIso <= toISODate(monthEnd)) {
+        events.push({
+          id: `card-close-${card.id}-${closingIso}`,
+          description: `Fechamento — ${card.name}`,
+          amount: total,
+          due_date: closingIso,
+          type: "info",
+          recurrence: "monthly",
+          recurrence_type: "monthly",
+          category_id: null,
+          status: "info",
+          is_paid: null,
+          paid_at: null,
+          created_at: null,
+          source: "card_closing",
+          source_id: card.id,
+        });
+      }
+
+      if (dueIso >= toISODate(monthStart) && dueIso <= toISODate(monthEnd)) {
+        events.push({
+          id: `card-due-${card.id}-${dueIso}`,
+          description: `Vencimento — ${card.name}`,
+          amount: total,
+          due_date: dueIso,
+          type: "payable",
+          recurrence: "monthly",
+          recurrence_type: "monthly",
+          category_id: null,
+          status: "pending",
+          is_paid: false,
+          paid_at: null,
+          created_at: null,
+          source: "card_due",
+          source_id: card.id,
+        });
+      }
+    });
+  });
+
+  // Dedupe by id (in case multiple monthRef candidates produced the same event)
+  const seen = new Set<string>();
+  return events.filter((event) => {
+    if (seen.has(event.id)) return false;
+    seen.add(event.id);
+    return true;
+  });
 };
 
 const ptCurrency = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
@@ -165,7 +256,7 @@ const SchedulePage = () => {
     const monthEnd = endOfMonth(viewMonth);
     const nextWeek = addDays(todayIso(), 7);
 
-    const [monthRes, dayRes, overdueRes, next7Res, categoriesRes, txMonthRes, debtsMonthRes] = await Promise.all([
+    const [monthRes, dayRes, overdueRes, next7Res, categoriesRes, txMonthRes, debtsMonthRes, cardsRes, cardTxRes] = await Promise.all([
       supabase
         .from("scheduled_payments")
         .select("*, categories(id, name, color, type)")
@@ -206,6 +297,15 @@ const SchedulePage = () => {
         .not("due_date", "is", null)
         .gte("due_date", toISODate(monthStart))
         .lte("due_date", toISODate(monthEnd)),
+      supabase.from("cards").select("id, name, closing_day, due_day").eq("family_id", family.id),
+      supabase
+        .from("transactions")
+        .select("card_id, amount, date")
+        .eq("family_id", family.id)
+        .eq("type", "expense")
+        .not("card_id", "is", null)
+        .gte("date", addDays(toISODate(monthStart), -45))
+        .lte("date", addDays(toISODate(monthEnd), 45)),
     ]);
 
     if (monthRes.error || dayRes.error || overdueRes.error || next7Res.error || categoriesRes.error) {
@@ -248,21 +348,34 @@ const SchedulePage = () => {
       source_id: String(d.id),
     }));
 
-    const monthRows = [...((monthRes.data as ScheduledRow[] | null) ?? []), ...txAsScheduled, ...debtsAsScheduled];
+    const cardsList = ((cardsRes.data ?? []) as Array<{ id: string; name: string; closing_day: number | null; due_day: number | null }>);
+    const cardTxs = ((cardTxRes.data ?? []) as Array<{ card_id: string | null; amount: number; date: string }>);
+    const cardEvents = buildCardEvents(cardsList, cardTxs, monthStart, monthEnd);
+    // Compute window for each list separately
+    const todayDate = new Date();
+    const next7DateEnd = new Date(todayDate);
+    next7DateEnd.setDate(next7DateEnd.getDate() + 8);
+    const cardEventsOverdue = buildCardEvents(cardsList, cardTxs, new Date(todayDate.getFullYear(), todayDate.getMonth() - 1, 1), new Date(todayDate.getFullYear(), todayDate.getMonth(), todayDate.getDate() - 1));
+    const cardEventsNext7 = buildCardEvents(cardsList, cardTxs, todayDate, next7DateEnd);
+
+    const monthRows = [...((monthRes.data as ScheduledRow[] | null) ?? []), ...txAsScheduled, ...debtsAsScheduled, ...cardEvents];
     const dayRows = [
       ...((dayRes.data as ScheduledRow[] | null) ?? []),
       ...txAsScheduled.filter((r) => r.due_date === selectedDate),
       ...debtsAsScheduled.filter((r) => r.due_date === selectedDate),
+      ...cardEvents.filter((r) => r.due_date === selectedDate),
     ];
     const overdueRows = [
       ...((overdueRes.data as ScheduledRow[] | null) ?? []),
       ...txAsScheduled.filter((r) => r.due_date < todayIso()),
       ...debtsAsScheduled.filter((r) => r.due_date < todayIso()),
+      ...cardEventsOverdue.filter((r) => r.source === "card_due" && r.due_date < todayIso()),
     ];
     const next7Rows = [
       ...((next7Res.data as ScheduledRow[] | null) ?? []),
       ...txAsScheduled.filter((r) => r.due_date >= todayIso() && r.due_date <= nextWeek),
       ...debtsAsScheduled.filter((r) => r.due_date >= todayIso() && r.due_date <= nextWeek),
+      ...cardEventsNext7.filter((r) => r.due_date >= todayIso() && r.due_date <= nextWeek),
     ];
 
     setMonthRows(monthRows);
@@ -356,6 +469,10 @@ const SchedulePage = () => {
     }
     if (row.source === "debt") {
       navigate(`/debts/${row.source_id}`);
+      return;
+    }
+    if (row.source === "card_closing" || row.source === "card_due") {
+      navigate(`/cards/${row.source_id}`);
       return;
     }
     setEditing(row);

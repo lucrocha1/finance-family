@@ -73,6 +73,7 @@
     --sidebar-ring: 160 84% 50%;
     --sidebar-hover-bg: 168 45% 20%;
     --sidebar-hover-foreground: 0 0% 100%;
+    --sidebar-header-bg: 0 0% 100% / 0.10;  /* faixa branco-translúcida em cima */
 
     /* Misc */
     --section-label: 220 9% 65%;      /* #9CA3AF */
@@ -150,6 +151,7 @@
     --sidebar-ring: 160 84% 50%;
     --sidebar-hover-bg: 168 45% 16%;
     --sidebar-hover-foreground: 0 0% 100%;
+    --sidebar-header-bg: 0 0% 0% / 0.30;  /* sombra escura em cima no dark */
 
     --section-label: 225 11% 50%;
     --placeholder-icon: 225 11% 38%;
