@@ -3,7 +3,6 @@ import {
   ArrowDownLeft,
   ArrowUpRight,
   Building2,
-  Check,
   Handshake,
   Pencil,
   Trash2,
