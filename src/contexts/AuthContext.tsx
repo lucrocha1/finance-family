@@ -14,8 +14,10 @@ type AuthContextValue = {
   user: User | null;
   session: Session | null;
   profile: Profile | null;
+  hasFamilyAccess: boolean;
   loading: boolean;
   refreshProfile: () => Promise<void>;
+  markFamilyLinked: () => void;
 };
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -28,6 +30,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
   const [session, setSession] = useState<Session | null>(null);
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
+  const [familyLinkedOverride, setFamilyLinkedOverride] = useState(false);
   const [loading, setLoading] = useState(true);
 
   const fetchProfile = useCallback(async (userId: string) => {
@@ -45,6 +48,10 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     setProfile(profileData);
   }, [fetchProfile, user]);
 
+  const markFamilyLinked = useCallback(() => {
+    setFamilyLinkedOverride(true);
+  }, []);
+
   useEffect(() => {
     let isMounted = true;
 
@@ -60,9 +67,11 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
         const profileData = await fetchProfile(nextSession.user.id);
         if (isMounted) {
           setProfile(profileData);
+          setFamilyLinkedOverride(Boolean(profileData?.family_id));
         }
       } else {
         setProfile(null);
+        setFamilyLinkedOverride(false);
       }
 
       if (isMounted) {
@@ -91,10 +100,12 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
       user,
       session,
       profile,
+      hasFamilyAccess: Boolean(profile?.family_id || familyLinkedOverride),
       loading,
       refreshProfile,
+      markFamilyLinked,
     }),
-    [loading, profile, refreshProfile, session, user],
+    [familyLinkedOverride, loading, markFamilyLinked, profile, refreshProfile, session, user],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
