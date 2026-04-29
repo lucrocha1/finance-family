@@ -256,53 +256,47 @@ const SchedulePage = () => {
     const monthEnd = endOfMonth(viewMonth);
     const nextWeek = addDays(todayIso(), 7);
 
+    // RLS already restricts every financial table to user_id = auth.uid().
+    // Keeping a redundant .eq("family_id", family.id) hides rows whose
+    // family_id drifted from the current FamilyContext, so we drop it
+    // across all queries.
     const [monthRes, dayRes, overdueRes, next7Res, categoriesRes, txMonthRes, debtsMonthRes, cardsRes, cardTxRes] = await Promise.all([
       supabase
         .from("scheduled_payments")
         .select("*, categories(id, name, color, type)")
-        .eq("family_id", family.id)
         .gte("due_date", toISODate(monthStart))
         .lte("due_date", toISODate(monthEnd)),
       supabase
         .from("scheduled_payments")
         .select("*, categories(id, name, color, type)")
-        .eq("family_id", family.id)
         .eq("due_date", selectedDate),
       supabase
         .from("scheduled_payments")
         .select("*")
-        .eq("family_id", family.id)
         .or("is_paid.eq.false,status.eq.pending,status.is.null")
         .lt("due_date", todayIso()),
       supabase
         .from("scheduled_payments")
         .select("*")
-        .eq("family_id", family.id)
         .or("is_paid.eq.false,status.eq.pending,status.is.null")
         .gte("due_date", todayIso())
         .lte("due_date", nextWeek),
-      supabase.from("categories").select("id, name, color, type").eq("family_id", family.id).order("name", { ascending: true }),
+      supabase.from("categories").select("id, name, color, type").order("name", { ascending: true }),
       supabase
         .from("transactions")
         .select("id, description, amount, date, type, status, category_id")
-        .eq("family_id", family.id)
         .eq("status", "pending")
         .is("card_id", null)
         .gte("date", toISODate(monthStart))
         .lte("date", toISODate(monthEnd)),
-      // Pull every active debt (parceled debts emit one event per
-      // installment, generated client-side below from start_date +
-      // total_installments).
       supabase
         .from("debts")
         .select("id, name, total_with_interest, original_amount, due_date, status, direction, has_installments, total_installments, installments_paid, installment_amount, start_date")
-        .eq("family_id", family.id)
         .neq("status", "paid"),
-      supabase.from("cards").select("id, name, closing_day, due_day").eq("family_id", family.id),
+      supabase.from("cards").select("id, name, closing_day, due_day"),
       supabase
         .from("transactions")
         .select("card_id, amount, date")
-        .eq("family_id", family.id)
         .eq("type", "expense")
         .not("card_id", "is", null)
         .gte("date", addDays(toISODate(monthStart), -45))

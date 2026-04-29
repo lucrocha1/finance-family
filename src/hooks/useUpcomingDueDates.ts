@@ -42,15 +42,13 @@ export const useUpcomingDueDates = (familyId: string | null | undefined) => {
     const end = toIso(horizon);
 
     const fetch = async () => {
+      // RLS already scopes results to user_id = auth.uid(); the
+      // .eq("family_id", ...) filter is redundant and was hiding rows
+      // with drifted family_id.
       const [txRes, schedRes, debtsRes, cardsRes, cardTxRes] = await Promise.all([
-        // Compromissos futuros = transações pending NÃO ligadas a cartão.
-        // Compras no cartão já aconteceram do ponto de vista do usuário —
-        // o que ainda vai acontecer é o pagamento da fatura, que entra
-        // na lista via "card_invoice" mais abaixo.
         supabase
           .from("transactions")
           .select("id, description, amount, date, type")
-          .eq("family_id", familyId)
           .eq("status", "pending")
           .is("card_id", null)
           .gte("date", today)
@@ -59,23 +57,20 @@ export const useUpcomingDueDates = (familyId: string | null | undefined) => {
         supabase
           .from("scheduled_payments")
           .select("id, description, amount, due_date, type, is_paid")
-          .eq("family_id", familyId)
           .gte("due_date", today)
           .lte("due_date", end)
           .order("due_date", { ascending: true }),
         supabase
           .from("debts")
           .select("id, name, total_with_interest, original_amount, due_date, status, direction")
-          .eq("family_id", familyId)
           .neq("status", "paid")
           .not("due_date", "is", null)
           .gte("due_date", today)
           .lte("due_date", end),
-        supabase.from("cards").select("id, name, closing_day, due_day").eq("family_id", familyId),
+        supabase.from("cards").select("id, name, closing_day, due_day"),
         supabase
           .from("transactions")
           .select("card_id, amount, date")
-          .eq("family_id", familyId)
           .eq("type", "expense")
           .not("card_id", "is", null)
           .gte("date", toIso(new Date(todayDate.getTime() - 45 * 86400000)))
