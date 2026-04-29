@@ -194,14 +194,18 @@ const FamilyPage = () => {
         </CardHeader>
         <CardContent className="space-y-3">
           {sortedMembers.map((member) => {
-            const fullName = member.profiles?.full_name || "Sem nome";
-            const email = member.profiles?.email || "Sem e-mail";
+            const isCurrentUser = member.user_id === currentUser?.id;
+            const fullName =
+              member.profiles?.full_name?.trim() ||
+              (isCurrentUser ? currentUser?.full_name?.trim() : "") ||
+              member.profiles?.email ||
+              "Usuário";
+            const email = member.profiles?.email || currentUser?.email || "Sem e-mail";
             const initials = fullName
               .split(/\s+/)
               .slice(0, 2)
               .map((part) => part[0]?.toUpperCase() ?? "")
               .join("") || "U";
-            const isCurrentUser = member.user_id === currentUser?.id;
 
             return (
               <div key={member.id} className="flex flex-col gap-3 rounded-xl border border-border bg-secondary/40 p-4 sm:flex-row sm:items-center sm:justify-between">
