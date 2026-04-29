@@ -173,12 +173,15 @@ const GoalsPage = () => {
 
     setLoading(true);
 
+    // RLS already enforces user_id = auth.uid() on every financial table,
+    // so .eq("family_id", family.id) is redundant — and actively hides
+    // rows whose family_id drifted from the current FamilyContext.
     const [categoriesRes, budgetsRes, txRes, goalsRes, contribRes] = await Promise.all([
-      supabase.from("categories").select("id, name, color, icon, type").eq("family_id", family.id).eq("type", "expense").order("name", { ascending: true }),
-      supabase.from("budgets").select("id, category_id, amount, month, year, user_id, family_id").eq("family_id", family.id).eq("month", month).eq("year", year),
-      supabase.from("transactions").select("category_id, amount, type, date").eq("family_id", family.id).eq("type", "expense").gte("date", from).lte("date", to),
-      supabase.from("goals").select("id, user_id, family_id, name, emoji, color, target_amount, current_amount, target_date, description, status, created_at").eq("family_id", family.id).order("created_at", { ascending: false }),
-      supabase.from("goal_contributions").select("id, goal_id, user_id, family_id, amount, date, notes").eq("family_id", family.id).order("date", { ascending: false }),
+      supabase.from("categories").select("id, name, color, icon, type").eq("type", "expense").order("name", { ascending: true }),
+      supabase.from("budgets").select("id, category_id, amount, month, year, user_id, family_id").eq("month", month).eq("year", year),
+      supabase.from("transactions").select("category_id, amount, type, date").eq("type", "expense").gte("date", from).lte("date", to),
+      supabase.from("goals").select("id, user_id, family_id, name, emoji, color, target_amount, current_amount, target_date, description, status, created_at").order("created_at", { ascending: false }),
+      supabase.from("goal_contributions").select("id, goal_id, user_id, family_id, amount, date, notes").order("date", { ascending: false }),
     ]);
 
     if (categoriesRes.error || budgetsRes.error || txRes.error || goalsRes.error || contribRes.error) {
