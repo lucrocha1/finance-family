@@ -13,8 +13,10 @@ import {
   UserCircle2,
 } from "lucide-react";
 import {
+  Area,
   Bar,
   BarChart,
+  CartesianGrid,
   Cell,
   Line,
   LineChart,
@@ -490,9 +492,17 @@ const DashboardPage = () => {
             <div className="h-[200px]">
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={flowData}>
+                  <defs>
+                    <linearGradient id="flowGradient" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#d946ef" stopOpacity={0.1} />
+                      <stop offset="100%" stopColor="#d946ef" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid stroke="#1a1a24" strokeOpacity={0.65} vertical={false} />
                   <XAxis dataKey="day" tick={{ fill: "#666", fontSize: 11 }} tickLine={false} axisLine={false} interval="preserveStartEnd" />
                   <YAxis tick={{ fill: "#666", fontSize: 11 }} tickFormatter={(value) => formatCompactBRL(value)} tickLine={false} axisLine={false} width={72} />
                   <Tooltip contentStyle={tooltipStyle} formatter={(value: number) => ptCurrency.format(Number(value || 0))} labelFormatter={(label) => `Dia ${label}`} />
+                  <Area type="monotone" dataKey="saldo" stroke="none" fill="url(#flowGradient)" />
                   <Line type="monotone" dataKey="saldo" stroke="#d946ef" strokeOpacity={flowTab === "projected" ? 0.4 : 1} strokeWidth={2} dot={false} />
                 </LineChart>
               </ResponsiveContainer>
@@ -581,6 +591,7 @@ const DashboardPage = () => {
             <div className="h-[200px]">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={dailyMovementData}>
+                  <CartesianGrid stroke="#1a1a24" strokeOpacity={0.65} vertical={false} />
                   <XAxis dataKey="day" tick={{ fill: "#666", fontSize: 11 }} tickLine={false} axisLine={false} interval="preserveStartEnd" />
                   <YAxis tick={{ fill: "#666", fontSize: 11 }} tickFormatter={(value) => formatCompactBRL(value)} tickLine={false} axisLine={false} width={72} />
                   <Tooltip contentStyle={tooltipStyle} formatter={(value: number, name: string) => [ptCurrency.format(Math.abs(Number(value || 0))), name === "income" ? "Receitas" : "Despesas"]} labelFormatter={(label) => `Dia ${label}`} />
