@@ -373,7 +373,7 @@ const ReportsPage = () => {
                     formatter={(value: number) => [ptCurrency.format(value), "Saldo"]}
                     labelFormatter={(label) => `Data: ${label}`}
                   />
-                  <Area type="monotone" dataKey="saldo" stroke="hsl(var(--accent))" fill="url(#balanceFill)" strokeWidth={2.2} />
+                  <Area type="natural" dataKey="saldo" stroke="hsl(var(--accent))" fill="url(#balanceFill)" strokeWidth={2.2} />
                 </AreaChart>
               </ResponsiveContainer>
             </div>
@@ -485,7 +485,7 @@ const ReportsPage = () => {
                   {trendByCategory.keys.map((cat) => (
                     <Line
                       key={cat.id}
-                      type="monotone"
+                      type="natural"
                       dataKey={cat.id}
                       name={cat.category}
                       stroke={cat.color}

@@ -532,7 +532,7 @@ const DashboardPage = () => {
                   <XAxis dataKey="day" tick={{ fill: chartColors.axis, fontSize: 11 }} tickLine={false} axisLine={false} interval="preserveStartEnd" />
                   <YAxis tick={{ fill: chartColors.axis, fontSize: 11 }} tickFormatter={(value) => formatCompactBRL(value)} tickLine={false} axisLine={false} width={72} />
                   <Tooltip contentStyle={tooltipStyle} formatter={(value: number) => ptCurrency.format(Number(value || 0))} labelFormatter={(label) => `Dia ${label}`} />
-                  <Area type="monotone" dataKey="saldo" stroke="hsl(var(--primary))" strokeWidth={2} strokeOpacity={flowTab === "projected" ? 0.4 : 1} fill="url(#flowGradient)" />
+                  <Area type="natural" dataKey="saldo" stroke="hsl(var(--primary))" strokeWidth={2} strokeOpacity={flowTab === "projected" ? 0.4 : 1} fill="url(#flowGradient)" />
                 </AreaChart>
               </ResponsiveContainer>
             </div>
@@ -641,8 +641,8 @@ const DashboardPage = () => {
                   <XAxis dataKey="day" tick={{ fill: chartColors.axis, fontSize: 11 }} tickLine={false} axisLine={false} interval="preserveStartEnd" />
                   <YAxis tick={{ fill: chartColors.axis, fontSize: 11 }} tickFormatter={(value) => formatCompactBRL(value)} tickLine={false} axisLine={false} width={72} />
                   <Tooltip contentStyle={tooltipStyle} formatter={(value: number, name: string) => [ptCurrency.format(Math.abs(Number(value || 0))), name === "income" ? "Receitas" : "Despesas"]} labelFormatter={(label) => `Dia ${label}`} />
-                  <Bar dataKey="income" fill={chartColors.income} radius={[2, 2, 0, 0]} />
-                  <Bar dataKey="expenseNegative" fill={chartColors.expense} radius={[2, 2, 0, 0]} />
+                  <Bar dataKey="income" fill={chartColors.income} radius={[6, 6, 0, 0]} />
+                  <Bar dataKey="expenseNegative" fill={chartColors.expense} radius={[6, 6, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </div>
