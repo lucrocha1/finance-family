@@ -62,7 +62,6 @@ const ptCurrency = new Intl.NumberFormat("pt-BR", { style: "currency", currency:
 const monthTitle = new Intl.DateTimeFormat("pt-BR", { month: "long", year: "numeric" });
 const monthLabel = new Intl.DateTimeFormat("pt-BR", { month: "long" });
 
-const today = new Date();
 const todayIso = () => toISODate(new Date());
 
 const formSchema = z.object({
@@ -510,7 +509,7 @@ const SchedulePage = () => {
                   type="button"
                   onClick={() => setSelectedDate(iso)}
                   className={cn(
-                    "group min-h-[80px] border-b border-r border-border/60 p-2 text-left transition-colors hover:bg-muted/30 sm:min-h-[82px]",
+                    "group min-h-[50px] border-b border-r border-border/60 p-2 text-left transition-colors hover:bg-muted/30 sm:min-h-[80px]",
                     !inMonth && "bg-black/10",
                     selected && "border-accent bg-accent/10",
                   )}
