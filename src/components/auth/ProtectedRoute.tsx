@@ -9,7 +9,7 @@ type ProtectedRouteProps = {
 };
 
 export const ProtectedRoute = ({ children }: ProtectedRouteProps) => {
-  const { loading, user, profile } = useAuth();
+  const { loading, user, hasFamilyAccess } = useAuth();
 
   if (loading) {
     return (
@@ -23,7 +23,7 @@ export const ProtectedRoute = ({ children }: ProtectedRouteProps) => {
     return <Navigate to="/login" replace />;
   }
 
-  if (!profile?.family_id) {
+  if (!hasFamilyAccess) {
     return <Navigate to="/setup-family" replace />;
   }
 
@@ -35,7 +35,7 @@ type PublicAuthRouteProps = {
 };
 
 export const PublicAuthRoute = ({ children }: PublicAuthRouteProps) => {
-  const { loading, user, profile } = useAuth();
+  const { loading, user, hasFamilyAccess } = useAuth();
 
   if (loading) {
     return (
@@ -46,7 +46,7 @@ export const PublicAuthRoute = ({ children }: PublicAuthRouteProps) => {
   }
 
   if (user) {
-    if (!profile?.family_id) {
+    if (!hasFamilyAccess) {
       return <Navigate to="/setup-family" replace />;
     }
 
@@ -61,7 +61,7 @@ type SetupFamilyRouteProps = {
 };
 
 export const SetupFamilyRoute = ({ children }: SetupFamilyRouteProps) => {
-  const { loading, user, profile } = useAuth();
+  const { loading, user, hasFamilyAccess } = useAuth();
 
   if (loading) {
     return (
@@ -75,7 +75,7 @@ export const SetupFamilyRoute = ({ children }: SetupFamilyRouteProps) => {
     return <Navigate to="/login" replace />;
   }
 
-  if (profile?.family_id) {
+  if (hasFamilyAccess) {
     return <Navigate to="/dashboard" replace />;
   }
 
