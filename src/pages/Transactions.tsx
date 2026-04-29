@@ -356,12 +356,19 @@ const TransactionsPage = () => {
     setSaving(true);
     setFormError(null);
 
+    // Compras no cartão sempre nascem com status="pending" — o limite só é
+    // liberado quando a fatura é paga (via "Pagar Fatura" em /cards/:id).
+    // Se o user marcou como "Pago" no form e selecionou cartão, ignoramos
+    // pra manter a lógica de limite/fluxo coerente.
+    const isCardExpense = parsed.data.type === "expense" && Boolean(parsed.data.cardId);
+    const baseStatus = isCardExpense ? "pending" : parsed.data.status;
+
     const base = {
       description: parsed.data.description.trim(),
       amount: parsed.data.amountCents / 100,
       date: parsed.data.date,
       notes: parsed.data.notes?.trim() || null,
-      status: parsed.data.status,
+      status: baseStatus,
       category_id: parsed.data.type === "transfer" ? null : parsed.data.categoryId,
       account_id: parsed.data.type === "transfer" ? parsed.data.fromAccountId : parsed.data.type === "expense" && parsed.data.cardId ? null : parsed.data.accountId,
       card_id: parsed.data.type === "expense" ? parsed.data.cardId : null,
