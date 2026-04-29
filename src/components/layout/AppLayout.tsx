@@ -1,0 +1,230 @@
+import { useMemo, useState } from "react";
+import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
+import {
+  ArrowLeftRight,
+  BarChart3,
+  Bell,
+  CalendarDays,
+  ChevronLeft,
+  ChevronRight,
+  CreditCard,
+  FileDown,
+  Handshake,
+  LayoutDashboard,
+  Menu,
+  Settings,
+  Target,
+  TrendingUp,
+  Users,
+} from "lucide-react";
+
+import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useAuth } from "@/contexts/AuthContext";
+import { useIsMobile } from "@/hooks/use-mobile";
+import { supabase } from "@/integrations/supabase/client";
+import { cn } from "@/lib/utils";
+
+const MAIN_ITEMS = [
+  { label: "Dashboard", path: "/dashboard", icon: LayoutDashboard },
+  { label: "Transações", path: "/transactions", icon: ArrowLeftRight },
+  { label: "Cartões", path: "/cards", icon: CreditCard },
+  { label: "Investimentos", path: "/investments", icon: TrendingUp },
+  { label: "Dívidas & Empréstimos", path: "/debts", icon: Handshake },
+  { label: "Agenda", path: "/schedule", icon: CalendarDays },
+] as const;
+
+const EXTRA_ITEMS = [
+  { label: "Relatórios", path: "/reports", icon: BarChart3 },
+  { label: "Metas & Orçamento", path: "/goals", icon: Target },
+  { label: "Importar CSV", path: "/import", icon: FileDown },
+] as const;
+
+const BOTTOM_ITEMS = [
+  { label: "Família", path: "/family", icon: Users },
+  { label: "Configurações", path: "/settings", icon: Settings },
+] as const;
+
+const ALL_ITEMS = [...MAIN_ITEMS, ...EXTRA_ITEMS, ...BOTTOM_ITEMS];
+
+export const AppLayout = () => {
+  const { profile, user } = useAuth();
+  const navigate = useNavigate();
+  const { pathname } = useLocation();
+  const isMobile = useIsMobile();
+
+  const [collapsed, setCollapsed] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const isCollapsed = !isMobile && collapsed;
+
+  const desktopSidebarWidth = isCollapsed ? "72px" : "260px";
+
+  const pageTitle = useMemo(() => {
+    return ALL_ITEMS.find((item) => item.path === pathname)?.label ?? "Dashboard";
+  }, [pathname]);
+
+  const displayName = profile?.full_name?.trim() || user?.user_metadata?.full_name || user?.email || "Usuário";
+
+  const initials = displayName
+    .toString()
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase() ?? "")
+    .join("") || "U";
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    navigate("/login", { replace: true });
+  };
+
+  const renderMenuItem = (item: (typeof ALL_ITEMS)[number]) => {
+    const content = (
+      <NavLink
+        key={item.path}
+        to={item.path}
+        onClick={() => setMobileOpen(false)}
+        className={({ isActive }) =>
+          cn(
+            "mx-3 flex items-center gap-3 rounded-[10px] px-3 py-2.5 text-sm font-medium transition-all duration-200",
+            isActive
+              ? "bg-primary/15 text-primary"
+              : "text-muted-foreground hover:bg-[hsl(var(--sidebar-hover-bg))] hover:text-[hsl(var(--sidebar-hover-foreground))]",
+          )
+        }
+      >
+        {({ isActive }) => (
+          <>
+            <item.icon className={cn("h-5 w-5 shrink-0 transition-colors duration-200", isActive ? "text-primary" : "text-muted-foreground")} />
+            {!isCollapsed && <span className="truncate">{item.label}</span>}
+          </>
+        )}
+      </NavLink>
+    );
+
+    if (isCollapsed && !isMobile) {
+      return (
+        <Tooltip key={item.path}>
+          <TooltipTrigger asChild>{content}</TooltipTrigger>
+          <TooltipContent side="right" className="border-border bg-card text-card-foreground">
+            {item.label}
+          </TooltipContent>
+        </Tooltip>
+      );
+    }
+
+    return content;
+  };
+
+  return (
+    <div className="min-h-screen bg-background">
+      {isMobile && mobileOpen && (
+        <button
+          aria-label="Fechar menu"
+          className="fixed inset-0 z-30 bg-[hsl(var(--overlay)/0.5)]"
+          onClick={() => setMobileOpen(false)}
+          type="button"
+        />
+      )}
+
+      <aside
+        className={cn(
+          "fixed inset-y-0 left-0 z-40 flex flex-col border-r border-border bg-sidebar transition-all duration-300",
+          isMobile ? "w-[260px]" : "",
+          isMobile ? (mobileOpen ? "translate-x-0" : "-translate-x-full") : "translate-x-0",
+        )}
+        style={{ width: isMobile ? "260px" : desktopSidebarWidth }}
+      >
+        <div className="relative flex h-16 items-center px-4">
+          <p className="text-xl font-bold text-primary">{isCollapsed ? "💰" : "💰 FinanceApp"}</p>
+          {!isMobile && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              onClick={() => setCollapsed((prev) => !prev)}
+              className="absolute right-3 h-8 w-8 rounded-md text-muted-foreground hover:bg-[hsl(var(--sidebar-hover-bg))] hover:text-foreground"
+              aria-label={isCollapsed ? "Expandir sidebar" : "Recolher sidebar"}
+            >
+              {isCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
+            </Button>
+          )}
+        </div>
+
+        <nav className="flex min-h-0 flex-1 flex-col pb-3">
+          <div className="space-y-1">{MAIN_ITEMS.map(renderMenuItem)}</div>
+
+          <div className="mx-3 my-3 h-px bg-border" />
+
+          <div className="space-y-1">
+            {!isCollapsed && <p className="px-4 pb-1 text-xs font-semibold uppercase tracking-normal text-[hsl(var(--section-label))]">Extras</p>}
+            {EXTRA_ITEMS.map(renderMenuItem)}
+          </div>
+
+          <div className="mx-3 my-3 h-px bg-border" />
+
+          <div className="mt-auto space-y-1">{BOTTOM_ITEMS.map(renderMenuItem)}</div>
+        </nav>
+      </aside>
+
+      <div className="transition-all duration-300" style={{ marginLeft: isMobile ? "0px" : desktopSidebarWidth }}>
+        <header className="sticky top-0 z-20 flex h-16 items-center justify-between border-b border-border bg-background px-6">
+          <div className="flex items-center gap-3">
+            {isMobile && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-9 w-9 text-muted-foreground hover:bg-secondary"
+                onClick={() => setMobileOpen(true)}
+                aria-label="Abrir menu"
+              >
+                <Menu className="h-5 w-5" />
+              </Button>
+            )}
+            <h1 className="text-xl font-bold text-foreground">{pageTitle}</h1>
+          </div>
+
+          <div className="flex items-center gap-4">
+            <button type="button" className="relative text-muted-foreground transition-colors hover:text-foreground" aria-label="Notificações">
+              <Bell className="h-5 w-5" />
+              <span className="absolute right-0 top-0 h-2 w-2 rounded-full bg-destructive" />
+            </button>
+
+            <div className="h-6 w-px bg-border" />
+
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button type="button" className="flex items-center gap-3 rounded-lg px-1 py-1 text-left transition-colors hover:bg-secondary">
+                  <span className="flex h-10 w-10 items-center justify-center rounded-full bg-primary text-sm font-bold text-primary-foreground">{initials}</span>
+                  <span className="hidden text-sm font-semibold text-foreground sm:block">{displayName}</span>
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-56 rounded-xl border-border bg-card text-card-foreground shadow-2xl">
+                <DropdownMenuItem onClick={() => navigate("/settings")}>Perfil</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => navigate("/settings")}>Configurações</DropdownMenuItem>
+                <DropdownMenuSeparator className="bg-border" />
+                <DropdownMenuItem onClick={handleLogout} className="text-destructive focus:text-destructive">
+                  Sair
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        </header>
+
+        <main className="h-[calc(100vh-4rem)] overflow-y-auto px-6 py-6">
+          <div className="mx-auto w-full max-w-[1400px]">
+            <Outlet />
+          </div>
+        </main>
+      </div>
+    </div>
+  );
+};

@@ -42,7 +42,7 @@ All colors MUST be HSL.
 
     --radius: 0.75rem;
 
-    --sidebar-background: 240 18.2% 8.6%;
+    --sidebar-background: 240 21% 6%;
     --sidebar-foreground: 0 0% 94.1%;
     --sidebar-primary: 292.2 84.1% 60.6%;
     --sidebar-primary-foreground: 0 0% 100%;
@@ -50,6 +50,12 @@ All colors MUST be HSL.
     --sidebar-accent-foreground: 0 0% 94.1%;
     --sidebar-border: 240 21.1% 14.9%;
     --sidebar-ring: 292.2 84.1% 60.6%;
+    --sidebar-hover-bg: 240 20% 13%;
+    --sidebar-hover-foreground: 0 0% 80%;
+    --section-label: 0 0% 33.3%;
+    --placeholder-icon: 0 0% 20%;
+    --placeholder-subtitle: 0 0% 33.3%;
+    --overlay: 240 10% 2%;
   }
 
   .dark {
@@ -82,7 +88,7 @@ All colors MUST be HSL.
     --border: 240 21.1% 14.9%;
     --input: 240 16.1% 12.2%;
     --ring: 292.2 84.1% 60.6%;
-    --sidebar-background: 240 18.2% 8.6%;
+    --sidebar-background: 240 21% 6%;
     --sidebar-foreground: 0 0% 94.1%;
     --sidebar-primary: 292.2 84.1% 60.6%;
     --sidebar-primary-foreground: 0 0% 100%;
@@ -90,6 +96,12 @@ All colors MUST be HSL.
     --sidebar-accent-foreground: 0 0% 94.1%;
     --sidebar-border: 240 21.1% 14.9%;
     --sidebar-ring: 292.2 84.1% 60.6%;
+    --sidebar-hover-bg: 240 20% 13%;
+    --sidebar-hover-foreground: 0 0% 80%;
+    --section-label: 0 0% 33.3%;
+    --placeholder-icon: 0 0% 20%;
+    --placeholder-subtitle: 0 0% 33.3%;
+    --overlay: 240 10% 2%;
   }
 }
 
