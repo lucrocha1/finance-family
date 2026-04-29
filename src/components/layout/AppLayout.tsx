@@ -155,7 +155,7 @@ export const AppLayout = () => {
 
       <aside
         className={cn(
-          "fixed inset-y-0 left-0 z-40 flex flex-col border-r border-border bg-sidebar transition-all duration-300",
+          "fixed inset-y-0 left-0 z-40 flex flex-col border-r border-border/60 bg-sidebar transition-all duration-300",
           isMobile ? "w-[260px]" : "",
           isMobile ? (mobileOpen ? "translate-x-0" : "-translate-x-full") : "translate-x-0",
         )}
@@ -197,7 +197,7 @@ export const AppLayout = () => {
       </aside>
 
       <div className="transition-all duration-300" style={{ marginLeft: isMobile ? "0px" : desktopSidebarWidth }}>
-        <header className="sticky top-0 z-20 flex h-16 items-center justify-between border-b border-border bg-background px-6">
+        <header className="glass-strong sticky top-0 z-20 flex h-16 items-center justify-between border-b border-border/60 px-6">
           <div className="flex items-center gap-3">
             {isMobile && (
               <Button
