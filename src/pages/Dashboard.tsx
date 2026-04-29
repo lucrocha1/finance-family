@@ -130,12 +130,10 @@ const DashboardPage = () => {
   const [cards, setCards] = useState<CardRow[]>([]);
   const [cardCommitments, setCardCommitments] = useState<Pick<TransactionRow, "card_id" | "amount" | "type">[]>([]);
   const [scheduledMonth, setScheduledMonth] = useState<ScheduledPaymentRow[]>([]);
-  const [scheduledToday, setScheduledToday] = useState<ScheduledPaymentRow[]>([]);
   const [scheduledWeek, setScheduledWeek] = useState<ScheduledPaymentRow[]>([]);
 
   const [categoriesTab, setCategoriesTab] = useState<"paid" | "pending">("paid");
   const [flowTab, setFlowTab] = useState<"realized" | "projected">("realized");
-  const [dailyTab, setDailyTab] = useState<"realized" | "projected">("realized");
 
   const monthStart = useMemo(() => startOfMonth(selectedMonth), [selectedMonth]);
   const monthEnd = useMemo(() => endOfMonth(selectedMonth), [selectedMonth]);
@@ -160,7 +158,7 @@ const DashboardPage = () => {
 
     const loadDashboard = async () => {
       setLoading(true);
-      const [txCurrent, txPrev, accountsRes, cardsRes, schedMonthRes, schedTodayRes, schedWeekRes, cardCommitRes] = await Promise.all([
+      const [txCurrent, txPrev, accountsRes, cardsRes, schedMonthRes, schedWeekRes, cardCommitRes] = await Promise.all([
         supabase
           .from("transactions")
           .select("id, family_id, user_id, card_id, category_id, amount, type, status, date, is_installment, is_recurring, categories ( id, name, icon, color )")
@@ -181,7 +179,6 @@ const DashboardPage = () => {
           .eq("family_id", family.id)
           .gte("due_date", toISODate(monthStart))
           .lte("due_date", toISODate(monthEnd)),
-        supabase.from("scheduled_payments").select("id, family_id, due_date, amount, type, is_paid").eq("family_id", family.id).eq("due_date", toISODate(new Date())),
         supabase
           .from("scheduled_payments")
           .select("id, family_id, due_date, amount, type, is_paid")
@@ -205,7 +202,6 @@ const DashboardPage = () => {
       setCards((cardsRes.data as CardRow[] | null) ?? []);
       setCardCommitments((cardCommitRes.data as Pick<TransactionRow, "card_id" | "amount" | "type">[] | null) ?? []);
       setScheduledMonth((schedMonthRes.data as ScheduledPaymentRow[] | null) ?? []);
-      setScheduledToday((schedTodayRes.data as ScheduledPaymentRow[] | null) ?? []);
       setScheduledWeek((schedWeekRes.data as ScheduledPaymentRow[] | null) ?? []);
       setLoading(false);
     };
@@ -318,24 +314,7 @@ const totalBankBalance = useMemo(() => accounts.reduce((sum, account) => sum + N
     });
   }, [flowTab, monthEnd, transactions]);
 
-  const dailyMovementData = useMemo(() => {
-    const daysInMonth = monthEnd.getDate();
-    const rows = Array.from({ length: daysInMonth }, (_, index) => ({ day: index + 1, income: 0, expense: 0 }));
-
-    transactions
-      .filter((tx) => (dailyTab === "realized" ? tx.status === "paid" : tx.status === "paid" || tx.status === "pending" || tx.status === null))
-      .forEach((tx) => {
-        const day = new Date(`${tx.date}T00:00:00`).getDate() - 1;
-        if (day < 0 || day >= rows.length) return;
-        if (tx.type === "income") rows[day].income += Number(tx.amount || 0);
-        if (tx.type === "expense") rows[day].expense += Number(tx.amount || 0);
-      });
-
-    return rows.map((row) => ({ ...row, expenseNegative: row.expense * -1 }));
-  }, [dailyTab, monthEnd, transactions]);
-
   const flowLastValue = flowData[flowData.length - 1]?.saldo ?? 0;
-  const totalMovements = dailyMovementData.reduce((sum, row) => sum + row.income + row.expense, 0);
 
   return (
     <div className="space-y-6">
@@ -584,39 +563,6 @@ const totalBankBalance = useMemo(() => accounts.reduce((sum, account) => sum + N
               })
             )}
           </CardContent>
-        </Card>
-
-        <Card className="rounded-xl border-border bg-card">
-          <CardHeader className="space-y-2">
-            <div className="flex items-center justify-between">
-              <CardTitle className="text-lg font-semibold">Movimentação Diária</CardTitle>
-              <div className="flex rounded-lg bg-secondary p-1">
-                <button type="button" onClick={() => setDailyTab("realized")} className={cn("rounded-md px-3 py-1 text-xs font-semibold", dailyTab === "realized" ? "bg-primary text-primary-foreground" : "text-muted-foreground")}>Realizado</button>
-                <button type="button" onClick={() => setDailyTab("projected")} className={cn("rounded-md px-3 py-1 text-xs font-semibold", dailyTab === "projected" ? "bg-primary text-primary-foreground" : "text-muted-foreground")}>Projetado</button>
-              </div>
-            </div>
-            <p className="text-sm text-muted-foreground">Total no mês: <span className="font-semibold text-foreground">{ptCurrency.format(totalMovements)}</span></p>
-          </CardHeader>
-          <CardContent>
-            <div className="h-[200px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={dailyMovementData}>
-                  <CartesianGrid stroke={chartColors.grid} strokeOpacity={0.65} vertical={false} />
-                  <XAxis dataKey="day" tick={{ fill: chartColors.axis, fontSize: 11 }} tickLine={false} axisLine={false} interval="preserveStartEnd" />
-                  <YAxis tick={{ fill: chartColors.axis, fontSize: 11 }} tickFormatter={(value) => formatCompactBRL(value)} tickLine={false} axisLine={false} width={72} />
-                  <Tooltip contentStyle={tooltipStyle} formatter={(value: number, name: string) => [ptCurrency.format(Math.abs(Number(value || 0))), name === "income" ? "Receitas" : "Despesas"]} labelFormatter={(label) => `Dia ${label}`} />
-                  <Bar dataKey="income" fill={chartColors.income} radius={[6, 6, 0, 0]} />
-                  <Bar dataKey="expenseNegative" fill={chartColors.expense} radius={[6, 6, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-            {!dailyMovementData.some((row) => row.income > 0 || row.expense > 0) && <p className="mt-2 text-center text-sm text-muted-foreground">Sem movimentações</p>}
-          </CardContent>
-        </Card>
-
-        <Card className="rounded-xl border-border bg-card">
-          <CardHeader><div className="flex items-center justify-between"><CardTitle className="text-lg font-semibold">Compromissos Hoje</CardTitle><Link to="/schedule" className="text-sm font-medium text-primary hover:opacity-80">Ver Agenda →</Link></div></CardHeader>
-          <CardContent className="space-y-2"><p className="text-xs font-semibold uppercase tracking-[0.5px] text-muted-foreground">Total de Compromissos</p><p className="text-3xl font-bold tabular-nums">{scheduledToday.length}</p>{scheduledToday.length === 0 && <div className="flex items-center gap-2 text-sm text-muted-foreground"><CheckCircle2 className="h-4 w-4 text-success" />Nenhum compromisso hoje</div>}</CardContent>
         </Card>
 
         <Card className="rounded-xl border-border bg-card">

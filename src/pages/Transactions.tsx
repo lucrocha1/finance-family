@@ -434,15 +434,16 @@ const TransactionsPage = () => {
       const groupId = crypto.randomUUID();
       const baseCents = Math.floor(parsed.data.amountCents / count);
       const remainder = parsed.data.amountCents % count;
+      // Compras parceladas no cartão: TODAS as parcelas nascem pending
+      // (a fatura precisa ser paga pra liberar o limite). Sem cartão (parcela
+      // direto da conta), só a primeira herda o status do form.
+      const isCardPurchase = Boolean(parsed.data.cardId);
       const rows = Array.from({ length: count }, (_, index) => {
         const due = new Date(date);
         due.setMonth(due.getMonth() + index);
         return {
           ...base,
-          // Only the first installment can inherit the form status (paid/pending);
-          // future ones are pending until the user marks them paid or the
-          // generated transaction's due date arrives.
-          status: index === 0 ? base.status : "pending",
+          status: isCardPurchase ? "pending" : index === 0 ? base.status : "pending",
           description: `${parsed.data.description.trim()} (${index + 1}/${count})`,
           amount: (baseCents + (index < remainder ? 1 : 0)) / 100,
           date: toISODate(due),
