@@ -245,7 +245,7 @@ export const AppLayout = () => {
                       <button
                         key={item.id}
                         type="button"
-                        onClick={() => navigate(item.source === "scheduled" ? "/schedule" : "/transactions")}
+                        onClick={() => navigate(item.routeTarget ?? "/schedule")}
                         className="flex w-full items-start justify-between gap-3 rounded-lg px-3 py-2 text-left hover:bg-secondary"
                       >
                         <div className="min-w-0 flex-1">

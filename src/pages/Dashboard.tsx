@@ -31,6 +31,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useFamily } from "@/contexts/FamilyContext";
+import { useUpcomingDueDates } from "@/hooks/useUpcomingDueDates";
 import { supabase } from "@/integrations/supabase/client";
 import { useChartColors } from "@/lib/chartColors";
 import { cn } from "@/lib/utils";
@@ -161,6 +162,7 @@ const DashboardPage = () => {
   const { family } = useFamily();
   const navigate = useNavigate();
   const chartColors = useChartColors();
+  const { items: weekItems } = useUpcomingDueDates(family?.id);
   const tooltipStyle = useMemo(
     () => ({
       background: chartColors.tooltipBg,
@@ -777,8 +779,35 @@ const totalBankBalance = useMemo(() => accounts.reduce((sum, account) => sum + N
         </Card>
 
         <Card className="rounded-xl border-border bg-card">
-          <CardHeader><div className="flex items-center justify-between"><CardTitle className="text-lg font-semibold">Compromissos da Semana</CardTitle><Link to="/schedule" className="text-sm font-medium text-primary hover:opacity-80">Ver Agenda →</Link></div></CardHeader>
-          <CardContent className="space-y-2"><p className="text-xs font-semibold uppercase tracking-[0.5px] text-muted-foreground">Dia mais movimentado</p>{busiestDay ? <p className="text-2xl font-bold">{busiestDay}</p> : <div className="flex items-center gap-2 text-sm text-muted-foreground"><CalendarCheck2 className="h-4 w-4 text-muted-foreground" />Sem dados no período</div>}</CardContent>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-lg font-semibold">Compromissos da Semana</CardTitle>
+              <Link to="/schedule" className="text-sm font-medium text-primary hover:opacity-80">Ver Agenda →</Link>
+            </div>
+            <CardDescription className="text-xs text-muted-foreground">Vencimentos, faturas e dívidas dos próximos 7 dias</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {weekItems.length === 0 ? (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground"><CalendarCheck2 className="h-4 w-4 text-success" />Nada vencendo nos próximos dias</div>
+            ) : (
+              weekItems.slice(0, 6).map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => navigate(item.routeTarget ?? "/schedule")}
+                  className="flex w-full items-center justify-between gap-3 rounded-lg border border-border bg-secondary/20 px-3 py-2 text-left hover:bg-secondary/40"
+                >
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-medium text-foreground">{item.description}</p>
+                    <p className="text-xs text-muted-foreground">{new Date(`${item.date}T00:00:00`).toLocaleDateString("pt-BR", { day: "2-digit", month: "short" })}</p>
+                  </div>
+                  <span className={cn("shrink-0 text-sm font-semibold tabular-nums", item.type === "income" ? "text-success" : "text-destructive")}>
+                    {item.type === "income" ? "+" : "-"}{ptCurrency.format(item.amount)}
+                  </span>
+                </button>
+              ))
+            )}
+          </CardContent>
         </Card>
 
       </div>
