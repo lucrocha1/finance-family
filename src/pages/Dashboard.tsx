@@ -395,11 +395,11 @@ const DashboardPage = () => {
 
         <div className="relative flex flex-col gap-6 sm:flex-row sm:items-end sm:justify-between">
           <div className="space-y-2">
-            <p className="text-xs font-semibold uppercase tracking-[1px] text-brandDark-muted">Fluxo do período (receitas − despesas)</p>
+            <p className="text-xs font-semibold uppercase tracking-[1px] text-brandDark-muted">Saldo bancário</p>
             <div className="flex items-baseline gap-3">
-              <p className="text-4xl font-bold tabular-nums sm:text-5xl">{ptCurrency.format(totals.balance)}</p>
-              <span className={cn("text-sm font-semibold", balanceVariation.improved ? "text-emerald-300" : "text-red-300")}>
-                {balanceVariation.improved ? "↗" : "↘"} {balanceVariation.value.toFixed(1)}%
+              <p className="text-4xl font-bold tabular-nums sm:text-5xl">{ptCurrency.format(totalBankBalance)}</p>
+              <span className="text-sm font-medium text-brandDark-muted">
+                {accounts.length} conta{accounts.length === 1 ? "" : "s"}
               </span>
             </div>
             {sparkPath && (
@@ -529,12 +529,29 @@ const DashboardPage = () => {
 
         <Card className="rounded-xl border-border bg-card">
           <CardHeader className="space-y-3">
-            <p className="text-xs font-semibold uppercase tracking-[0.5px] text-muted-foreground">Saldo bancário total</p>
-            <CardDescription className="text-sm text-muted-foreground">Soma de todas as contas cadastradas</CardDescription>
-            <CardTitle className="text-3xl font-bold tabular-nums">{ptCurrency.format(totalBankBalance)}</CardTitle>
+            <p className="text-xs font-semibold uppercase tracking-[0.5px] text-muted-foreground">Fluxo do período</p>
+            <CardDescription className="text-sm text-muted-foreground">Receitas menos despesas no mês</CardDescription>
+            <div className="flex items-baseline gap-3">
+              <CardTitle className={cn("text-3xl font-bold tabular-nums", totals.balance >= 0 ? "text-success" : "text-destructive")}>
+                {ptCurrency.format(totals.balance)}
+              </CardTitle>
+              <span className={cn("text-sm font-semibold", balanceVariation.improved ? "text-success" : "text-destructive")}>
+                {balanceVariation.improved ? "↗" : "↘"} {balanceVariation.value.toFixed(1)}%
+              </span>
+            </div>
           </CardHeader>
-          <CardContent>
-            <Link to="/settings" className="text-sm font-medium text-primary hover:opacity-80">Ver todas as contas →</Link>
+          <CardContent className="space-y-2 text-sm text-muted-foreground">
+            <div className="flex items-center justify-between">
+              <span>Receitas</span>
+              <span className="font-semibold tabular-nums text-success">{ptCurrency.format(totals.income)}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span>Despesas</span>
+              <span className="font-semibold tabular-nums text-destructive">{ptCurrency.format(totals.expense)}</span>
+            </div>
+            <div className="border-t border-border pt-2 text-xs">
+              vs. {ptCurrency.format(totals.previousBalance)} no período anterior
+            </div>
           </CardContent>
         </Card>
 
