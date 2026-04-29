@@ -174,24 +174,30 @@ const TransactionsPage = () => {
     }
 
     setLoading(true);
+    // RLS now enforces user_id = auth.uid() on all financial tables, so family_id
+    // filtering is redundant — and was hiding records that have a different
+    // family_id than the one currently in context (e.g. cards created before the
+    // family was set up properly).
     const [txRes, categoriesRes, accountsRes, cardsRes] = await Promise.all([
       supabase
         .from("transactions")
         .select("*, categories(*), accounts(*), cards(*), profiles:user_id(full_name, email)")
-        .eq("family_id", family.id)
         .gte("date", toISODate(monthStart))
         .lte("date", toISODate(monthEnd))
         .order("date", { ascending: false }),
-      supabase.from("categories").select("id, name, color, type, icon").eq("family_id", family.id).order("name", { ascending: true }),
-      supabase.from("accounts").select("id, name, institution").eq("family_id", family.id).order("name", { ascending: true }),
-      supabase.from("cards").select("id, name, brand, last4").eq("family_id", family.id).order("name", { ascending: true }),
+      supabase.from("categories").select("id, name, color, type, icon").order("name", { ascending: true }),
+      supabase.from("accounts").select("id, name, institution").order("name", { ascending: true }),
+      supabase.from("cards").select("id, name, brand, last4").order("name", { ascending: true }),
     ]);
+
+    if (cardsRes.error) {
+      console.warn("[Transactions] cards query failed:", cardsRes.error);
+    }
 
     if (txRes.error) {
       const fallback = await supabase
         .from("transactions")
         .select("*, categories(*), accounts(*), cards(*)")
-        .eq("family_id", family.id)
         .gte("date", toISODate(monthStart))
         .lte("date", toISODate(monthEnd))
         .order("date", { ascending: false });
