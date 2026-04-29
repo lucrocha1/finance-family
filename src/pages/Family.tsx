@@ -19,6 +19,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
 import { useFamily } from "@/contexts/FamilyContext";
+import { supabase } from "@/integrations/supabase/client";
 
 const familyNameSchema = z.object({
   name: z
