@@ -31,6 +31,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
+import sidebarLogo from "@/assets/sidebar-logo.png";
 
 const MAIN_ITEMS = [
   { label: "Dashboard", path: "/dashboard", icon: LayoutDashboard },
@@ -150,7 +151,10 @@ export const AppLayout = () => {
         style={{ width: isMobile ? "260px" : desktopSidebarWidth }}
       >
         <div className="relative flex h-16 items-center px-4">
-          <p className="text-xl font-bold text-primary">{isCollapsed ? "💰" : "💰 Finance Family"}</p>
+          <div className={cn("flex items-center", isCollapsed ? "justify-center" : "gap-2.5")}>
+            <img src={sidebarLogo} alt="Finance Family" className="h-9 w-9 rounded-md object-cover" />
+            {!isCollapsed && <span className="text-lg font-bold text-primary">Finance Family</span>}
+          </div>
           {!isMobile && (
             <Button
               type="button"
