@@ -287,6 +287,7 @@ const SchedulePage = () => {
         .select("id, description, amount, date, type, status, category_id")
         .eq("family_id", family.id)
         .eq("status", "pending")
+        .is("card_id", null)
         .gte("date", toISODate(monthStart))
         .lte("date", toISODate(monthEnd)),
       // Pull every active debt (parceled debts emit one event per

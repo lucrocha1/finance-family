@@ -43,11 +43,16 @@ export const useUpcomingDueDates = (familyId: string | null | undefined) => {
 
     const fetch = async () => {
       const [txRes, schedRes, debtsRes, cardsRes, cardTxRes] = await Promise.all([
+        // Compromissos futuros = transações pending NÃO ligadas a cartão.
+        // Compras no cartão já aconteceram do ponto de vista do usuário —
+        // o que ainda vai acontecer é o pagamento da fatura, que entra
+        // na lista via "card_invoice" mais abaixo.
         supabase
           .from("transactions")
           .select("id, description, amount, date, type")
           .eq("family_id", familyId)
           .eq("status", "pending")
+          .is("card_id", null)
           .gte("date", today)
           .lte("date", end)
           .order("date", { ascending: true }),
