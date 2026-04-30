@@ -293,12 +293,28 @@ const DashboardPage = () => {
     void loadDashboard();
   }, [family?.id, monthEnd, monthStart, prevMonthEnd, prevMonthStart, weekEnd, weekStart]);
 
+  // Transações de cartão cuja fatura VENCE no mês visualizado, separadas
+  // por status. Usadas para popular o donut "A Pagar" (pending) e "Pago"
+  // (paid) com as categorias originais das compras. Declarado ANTES de
+  // totals/donutData porque eles dependem disso.
+  const cardTxsDueInMonth = useMemo(() => {
+    const result: Array<typeof cardTransactions[number]> = [];
+    cards.forEach((card) => {
+      const closingDay = Number(card.closing_day || 0);
+      const dueDay = Number(card.due_day || 0);
+      if (!closingDay || !dueDay) return;
+      const cycle = getInvoiceCycleForMonth(closingDay, dueDay, monthStart.getFullYear(), monthStart.getMonth());
+      const cycleStartIso = toISODate(cycle.cycleStart);
+      const cycleEndIso = toISODate(cycle.cycleEnd);
+      const inCycle = cardTransactions.filter((tx) => tx.card_id === card.id && tx.date >= cycleStartIso && tx.date <= cycleEndIso);
+      console.info(`[Dashboard] cycle ${card.name} ${cycleStartIso} → ${cycleEndIso}: ${inCycle.length} txs`, inCycle.map((t) => ({ date: t.date, amount: t.amount, status: t.status, cat: t.category_id })));
+      inCycle.forEach((tx) => result.push(tx));
+    });
+    console.info("[Dashboard] cardTxsDueInMonth total:", result.length);
+    return result;
+  }, [cards, cardTransactions, monthStart]);
+
   const totals = useMemo(() => {
-    // Fluxo do período = movimentos do mês visualizado pela ótica do caixa:
-    // - Receitas/despesas não-cartão (paid+pending)
-    // - Faturas de cartão pendentes a vencer no mês (projetadas)
-    // - Faturas pagas via "Pagar Fatura" já entram via a transação
-    //   "Pagamento Fatura" com card_id=null no filtro acima.
     const isCash = (tx: TransactionRow) => !tx.card_id;
     const income = transactions.filter((tx) => tx.type === "income" && isCash(tx)).reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
     const expenseDirect = transactions.filter((tx) => tx.type === "expense" && isCash(tx)).reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
@@ -319,27 +335,7 @@ const DashboardPage = () => {
     return { improved, value: percentage };
   }, [totals.balance, totals.previousBalance]);
 
-const totalBankBalance = useMemo(() => accounts.reduce((sum, account) => sum + Number(account.balance || 0), 0), [accounts]);
-
-  // Transações de cartão cuja fatura VENCE no mês visualizado, separadas
-  // por status. Usadas para popular o donut "A Pagar" (pending) e "Pago"
-  // (paid) com as categorias originais das compras.
-  const cardTxsDueInMonth = useMemo(() => {
-    const result: Array<typeof cardTransactions[number]> = [];
-    cards.forEach((card) => {
-      const closingDay = Number(card.closing_day || 0);
-      const dueDay = Number(card.due_day || 0);
-      if (!closingDay || !dueDay) return;
-      const cycle = getInvoiceCycleForMonth(closingDay, dueDay, monthStart.getFullYear(), monthStart.getMonth());
-      const cycleStartIso = toISODate(cycle.cycleStart);
-      const cycleEndIso = toISODate(cycle.cycleEnd);
-      const inCycle = cardTransactions.filter((tx) => tx.card_id === card.id && tx.date >= cycleStartIso && tx.date <= cycleEndIso);
-      console.info(`[Dashboard] cycle ${card.name} ${cycleStartIso} → ${cycleEndIso}: ${inCycle.length} txs`, inCycle.map((t) => ({ date: t.date, amount: t.amount, status: t.status, cat: t.category_id })));
-      inCycle.forEach((tx) => result.push(tx));
-    });
-    console.info("[Dashboard] cardTxsDueInMonth total:", result.length);
-    return result;
-  }, [cards, cardTransactions, monthStart]);
+  const totalBankBalance = useMemo(() => accounts.reduce((sum, account) => sum + Number(account.balance || 0), 0), [accounts]);
 
   // Faturas de cartão que vencem no mês visível, tratadas como UMA despesa
   // pendente única na data de vencimento. Se a fatura já foi paga (via
