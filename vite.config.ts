@@ -18,32 +18,12 @@ export default defineConfig(({ mode }) => ({
     mode === "development" && componentTagger(),
     VitePWA({
       registerType: "autoUpdate",
+      strategies: "injectManifest",
+      srcDir: "src",
+      filename: "sw.ts",
       includeAssets: ["favicon.png", "apple-touch-icon.png", "robots.txt"],
-      workbox: {
+      injectManifest: {
         globPatterns: ["**/*.{js,css,html,ico,png,svg,webmanifest}"],
-        navigateFallback: "/index.html",
-        navigateFallbackDenylist: [/^\/api/, /^\/auth/],
-        runtimeCaching: [
-          {
-            urlPattern: /^https:\/\/.*\.supabase\.co\/.*$/,
-            handler: "NetworkFirst",
-            options: {
-              cacheName: "supabase-api",
-              networkTimeoutSeconds: 5,
-              expiration: { maxEntries: 50, maxAgeSeconds: 60 * 60 * 24 },
-              cacheableResponse: { statuses: [0, 200] },
-            },
-          },
-          {
-            urlPattern: /^https:\/\/fonts\.(googleapis|gstatic)\.com\/.*$/,
-            handler: "CacheFirst",
-            options: {
-              cacheName: "google-fonts",
-              expiration: { maxEntries: 30, maxAgeSeconds: 60 * 60 * 24 * 365 },
-              cacheableResponse: { statuses: [0, 200] },
-            },
-          },
-        ],
       },
       manifest: {
         name: "Finance Family",

@@ -39,13 +39,54 @@ const isoWeek = (d = new Date()) => {
 };
 const monthKey = (date = new Date()) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
 
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
+const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+
+// Dispara web push pra cada notificação recém-inserida. Faz best-effort
+// — se falhar (chave VAPID não configurada, função não deployada,
+// erro de rede), apenas loga. A notificação in-app continua funcionando.
+const dispatchPush = async (item: Notif) => {
+  try {
+    await fetch(`${SUPABASE_URL}/functions/v1/send-push-notifications`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${SERVICE_ROLE}`,
+      },
+      body: JSON.stringify({
+        user_id: item.user_id,
+        title: item.title,
+        body: item.body,
+        link: item.link_to,
+        severity: item.severity,
+      }),
+    });
+  } catch (err) {
+    console.warn("[notify] push dispatch failed:", err);
+  }
+};
+
 const insertNotifications = async (sb: SupabaseClient, items: Notif[]) => {
   if (items.length === 0) return;
+  // Lemos o que já existe pra detectar quais foram realmente inseridas
+  // (evita disparar push pra notificação que já existia em iterações anteriores).
+  const dedupKeys = items.map((i) => i.dedup_key).filter((k): k is string => Boolean(k));
+  const { data: existing } = dedupKeys.length > 0
+    ? await sb.from("notifications").select("dedup_key").in("dedup_key", dedupKeys)
+    : { data: [] as { dedup_key: string }[] };
+  const existingSet = new Set((existing ?? []).map((row) => row.dedup_key));
+  const fresh = items.filter((i) => !i.dedup_key || !existingSet.has(i.dedup_key));
+
   const { error } = await sb.from("notifications").upsert(items, {
     onConflict: "user_id,dedup_key",
     ignoreDuplicates: true,
   });
-  if (error) console.error("[notify] insert failed:", error.message);
+  if (error) {
+    console.error("[notify] insert failed:", error.message);
+    return;
+  }
+  // Push só pras realmente novas
+  await Promise.all(fresh.map(dispatchPush));
 };
 
 // ---- Snapshots de investimentos ----
