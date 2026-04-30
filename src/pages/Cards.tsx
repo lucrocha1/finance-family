@@ -13,6 +13,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { PageSkeleton } from "@/components/PageSkeleton";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -359,7 +360,7 @@ const CardsPage = () => {
       </div>
 
       {loading ? (
-        <div className="rounded-xl border border-border bg-card p-8 text-sm text-muted-foreground">Carregando cartões...</div>
+        <PageSkeleton rows={3} />
       ) : cardsWithUsage.length === 0 ? (
         <div className="rounded-xl border border-dashed border-border bg-secondary/20 p-8 text-sm text-muted-foreground">Nenhum cartão cadastrado ainda.</div>
       ) : (

@@ -38,6 +38,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "@/components/ui/sonner";
+import { PageSkeleton } from "@/components/PageSkeleton";
 import { PlannedItemDialog } from "@/components/PlannedItemDialog";
 import { SchedulePlannedDialog } from "@/components/SchedulePlannedDialog";
 import { useAuth } from "@/contexts/AuthContext";
@@ -577,7 +578,7 @@ const InvestmentsPage = () => {
       </div>
 
       {loading ? (
-        <div className="rounded-xl border border-border bg-card p-8 text-sm text-muted-foreground">Carregando investimentos...</div>
+        <PageSkeleton rows={3} />
       ) : filteredAndSorted.length === 0 ? (
         <div className="rounded-xl border border-dashed border-border bg-secondary/20 p-10 text-center">
           <TrendingUp className="mx-auto h-14 w-14 text-[hsl(var(--placeholder-icon))]" />

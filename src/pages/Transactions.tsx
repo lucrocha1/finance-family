@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { z } from "zod";
 
+import { PageSkeleton } from "@/components/PageSkeleton";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import { Card, CardContent } from "@/components/ui/card";
@@ -697,7 +698,7 @@ const TransactionsPage = () => {
       <Card className="rounded-xl border-border bg-card">
         <CardContent className="p-0">
           {loading ? (
-            <div className="flex min-h-[300px] items-center justify-center text-sm text-muted-foreground">Carregando transações...</div>
+            <PageSkeleton rows={6} withHeader={false} />
           ) : filtered.length === 0 ? (
             <div className="flex min-h-[300px] flex-col items-center justify-center gap-2 text-center"><ArrowLeftRight className="h-10 w-10 text-[hsl(var(--placeholder-icon))]" /><p className="text-base font-semibold text-foreground">Nenhuma transação encontrada</p><p className="text-sm text-muted-foreground">Adicione sua primeira transação</p><Button className="mt-2" onClick={openCreate}>+ Nova Transação</Button></div>
           ) : (
