@@ -438,7 +438,12 @@ const totalBankBalance = useMemo(() => accounts.reduce((sum, account) => sum + N
     const daysInMonth = monthEnd.getDate();
     const rows = Array.from({ length: daysInMonth }, (_, index) => ({ day: index + 1, change: 0, saldo: 0 }));
 
+    // Card-funded transactions don't affect the cash flow until the
+    // invoice is paid, so we exclude them here just like in totals /
+    // projected cash. The invoice payment itself is a non-card
+    // transaction and shows up normally.
     transactions
+      .filter((tx) => !tx.card_id)
       .filter((tx) => (flowTab === "realized" ? tx.status === "paid" : tx.status === "paid" || tx.status === "pending" || tx.status === null))
       .forEach((tx) => {
         const day = new Date(`${tx.date}T00:00:00`).getDate();
