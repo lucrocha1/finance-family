@@ -38,9 +38,12 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "@/components/ui/sonner";
+import { PlannedItemDialog } from "@/components/PlannedItemDialog";
+import { SchedulePlannedDialog } from "@/components/SchedulePlannedDialog";
 import { useAuth } from "@/contexts/AuthContext";
 import { useFamily } from "@/contexts/FamilyContext";
 import { supabase } from "@/integrations/supabase/client";
+import { priorityLabel, type PlannedItemRow } from "@/lib/plannedItems";
 import { cn } from "@/lib/utils";
 
 type InvestmentType = "stocks" | "crypto" | "fixed_income" | "fund" | "savings" | "real_estate" | "other";
@@ -109,6 +112,12 @@ const InvestmentsPage = () => {
 
   const [loading, setLoading] = useState(true);
   const [investments, setInvestments] = useState<InvestmentRow[]>([]);
+  const [view, setView] = useState<"current" | "planned">("current");
+  const [plannedItems, setPlannedItems] = useState<PlannedItemRow[]>([]);
+  const [plannedDialogOpen, setPlannedDialogOpen] = useState(false);
+  const [plannedEditing, setPlannedEditing] = useState<PlannedItemRow | null>(null);
+  const [scheduleDialogOpen, setScheduleDialogOpen] = useState(false);
+  const [scheduleTarget, setScheduleTarget] = useState<PlannedItemRow | null>(null);
 
   const [sortBy, setSortBy] = useState<SortOption>("highest_value");
   const [typeFilter, setTypeFilter] = useState<"all" | InvestmentType>("all");
@@ -138,19 +147,23 @@ const InvestmentsPage = () => {
   const loadData = useCallback(async () => {
     if (!family?.id) {
       setInvestments([]);
+      setPlannedItems([]);
       setLoading(false);
       return;
     }
 
     setLoading(true);
-    const { data, error } = await supabase.from("investments").select("*").eq("family_id", family.id).order("created_at", { ascending: false });
-    if (error) {
+    const [invRes, plannedRes] = await Promise.all([
+      supabase.from("investments").select("*").order("created_at", { ascending: false }),
+      supabase.from("planned_items").select("*").eq("kind", "investment").order("created_at", { ascending: false }),
+    ]);
+    if (invRes.error) {
       toast.error("Erro ao carregar investimentos");
       setLoading(false);
       return;
     }
 
-    const normalized = ((data as Record<string, unknown>[] | null) ?? []).map<InvestmentRow>((row) => ({
+    const normalized = ((invRes.data as Record<string, unknown>[] | null) ?? []).map<InvestmentRow>((row) => ({
       id: String(row.id ?? ""),
       user_id: String(row.user_id ?? ""),
       family_id: String(row.family_id ?? family.id),
@@ -166,6 +179,7 @@ const InvestmentsPage = () => {
     }));
 
     setInvestments(normalized);
+    setPlannedItems((plannedRes.data as PlannedItemRow[] | null) ?? []);
     setLoading(false);
   }, [family?.id]);
 
@@ -363,8 +377,94 @@ const InvestmentsPage = () => {
     toast.success("Valor atualizado");
   };
 
+  const openPlannedCreate = () => {
+    setPlannedEditing(null);
+    setPlannedDialogOpen(true);
+  };
+
+  const openPlannedEdit = (item: PlannedItemRow) => {
+    setPlannedEditing(item);
+    setPlannedDialogOpen(true);
+  };
+
+  const openSchedule = (item: PlannedItemRow) => {
+    setScheduleTarget(item);
+    setScheduleDialogOpen(true);
+  };
+
+  const deletePlanned = async (item: PlannedItemRow) => {
+    const { error } = await supabase.from("planned_items").delete().eq("id", item.id);
+    if (error) {
+      toast.error(error.message || "Erro ao excluir");
+      return;
+    }
+    toast.success("Planejado excluído");
+    await loadData();
+  };
+
   return (
     <div className="space-y-5">
+      <div className="inline-flex rounded-lg bg-secondary/40 p-1">
+        <button
+          type="button"
+          onClick={() => setView("current")}
+          className={cn("rounded-md px-4 py-1.5 text-sm font-semibold", view === "current" ? "bg-primary text-primary-foreground" : "text-muted-foreground")}
+        >
+          Atuais
+        </button>
+        <button
+          type="button"
+          onClick={() => setView("planned")}
+          className={cn("rounded-md px-4 py-1.5 text-sm font-semibold", view === "planned" ? "bg-primary text-primary-foreground" : "text-muted-foreground")}
+        >
+          Planejados {plannedItems.length > 0 && <span className="ml-1 opacity-70">({plannedItems.length})</span>}
+        </button>
+      </div>
+
+      {view === "planned" ? (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <p className="text-sm text-muted-foreground">Investimentos que você quer fazer no futuro. Não entram em cálculos até serem agendados.</p>
+            <Button onClick={openPlannedCreate} className="h-10 rounded-lg font-semibold">+ Novo Planejado</Button>
+          </div>
+
+          {plannedItems.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-border bg-secondary/20 p-10 text-center">
+              <PiggyBank className="mx-auto h-12 w-12 text-muted-foreground/60" />
+              <p className="mt-3 text-base font-semibold text-foreground">Nenhum investimento planejado</p>
+              <p className="mt-1 text-sm text-muted-foreground">Adicione metas de investimento sem precisar definir data ainda.</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+              {plannedItems.map((item) => (
+                <div key={item.id} className="rounded-xl border border-border bg-card p-5">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-base font-semibold text-foreground">{item.description}</p>
+                      <p className="mt-1 text-2xl font-bold tabular-nums text-foreground">{ptCurrency.format(item.amount)}</p>
+                    </div>
+                    <span className={cn("shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
+                      item.priority === "high" ? "bg-destructive/15 text-destructive" :
+                      item.priority === "low" ? "bg-secondary text-muted-foreground" :
+                      "bg-warning/15 text-warning")}>
+                      {priorityLabel[item.priority]}
+                    </span>
+                  </div>
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    {item.target_date ? `Meta: ${new Date(`${item.target_date}T00:00:00`).toLocaleDateString("pt-BR")}` : "Sem data definida"}
+                  </p>
+                  {item.notes && <p className="mt-2 text-sm text-muted-foreground">{item.notes}</p>}
+                  <div className="mt-4 flex items-center gap-2">
+                    <Button size="sm" onClick={() => openSchedule(item)} className="h-8">Agendar</Button>
+                    <Button size="sm" variant="outline" onClick={() => openPlannedEdit(item)} className="h-8"><Pencil className="h-3.5 w-3.5" /></Button>
+                    <Button size="sm" variant="ghost" onClick={() => void deletePlanned(item)} className="h-8 text-muted-foreground hover:text-destructive"><Trash2 className="h-3.5 w-3.5" /></Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      ) : (<>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2">
           <Label className="sr-only">Ordenação</Label>
@@ -721,6 +821,22 @@ const InvestmentsPage = () => {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      </>)}
+
+      <PlannedItemDialog
+        open={plannedDialogOpen}
+        kind="investment"
+        editing={plannedEditing}
+        onClose={() => setPlannedDialogOpen(false)}
+        onSaved={() => void loadData()}
+      />
+
+      <SchedulePlannedDialog
+        open={scheduleDialogOpen}
+        item={scheduleTarget}
+        onClose={() => setScheduleDialogOpen(false)}
+        onScheduled={() => void loadData()}
+      />
     </div>
   );
 };

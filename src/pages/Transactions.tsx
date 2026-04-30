@@ -33,6 +33,9 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useFamily } from "@/contexts/FamilyContext";
 import { supabase } from "@/integrations/supabase/client";
 import { ensureFamily } from "@/lib/familyGuard";
+import { priorityLabel, type PlannedItemRow } from "@/lib/plannedItems";
+import { PlannedItemDialog } from "@/components/PlannedItemDialog";
+import { SchedulePlannedDialog } from "@/components/SchedulePlannedDialog";
 import { cn } from "@/lib/utils";
 
 type TxType = "income" | "expense" | "transfer" | string;
@@ -143,6 +146,14 @@ const TransactionsPage = () => {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<TransactionRow | null>(null);
 
+  const [listView, setListView] = useState<"transactions" | "planned">("transactions");
+  const [plannedItems, setPlannedItems] = useState<PlannedItemRow[]>([]);
+  const [plannedDialogOpen, setPlannedDialogOpen] = useState(false);
+  const [plannedKind, setPlannedKind] = useState<"expense" | "income">("expense");
+  const [plannedEditing, setPlannedEditing] = useState<PlannedItemRow | null>(null);
+  const [scheduleDialogOpen, setScheduleDialogOpen] = useState(false);
+  const [scheduleTarget, setScheduleTarget] = useState<PlannedItemRow | null>(null);
+
   const [formType, setFormType] = useState<"income" | "expense" | "transfer">("expense");
   const [description, setDescription] = useState("");
   const [amountDigits, setAmountDigits] = useState("");
@@ -169,16 +180,13 @@ const TransactionsPage = () => {
       setCategories([]);
       setAccounts([]);
       setCards([]);
+      setPlannedItems([]);
       setLoading(false);
       return;
     }
 
     setLoading(true);
-    // RLS now enforces user_id = auth.uid() on all financial tables, so family_id
-    // filtering is redundant — and was hiding records that have a different
-    // family_id than the one currently in context (e.g. cards created before the
-    // family was set up properly).
-    const [txRes, categoriesRes, accountsRes, cardsRes] = await Promise.all([
+    const [txRes, categoriesRes, accountsRes, cardsRes, plannedRes] = await Promise.all([
       supabase
         .from("transactions")
         .select("*, categories(*), accounts(*), cards(*)")
@@ -188,7 +196,9 @@ const TransactionsPage = () => {
       supabase.from("categories").select("id, name, color, type, icon").order("name", { ascending: true }),
       supabase.from("accounts").select("id, name, institution").order("name", { ascending: true }),
       supabase.from("cards").select("id, name, brand").order("name", { ascending: true }),
+      supabase.from("planned_items").select("*").in("kind", ["expense", "income"]).order("created_at", { ascending: false }),
     ]);
+    setPlannedItems((plannedRes.data as PlannedItemRow[] | null) ?? []);
 
     if (cardsRes.error) {
       console.warn("[Transactions] cards query failed:", cardsRes.error);
@@ -539,12 +549,121 @@ const TransactionsPage = () => {
     toast.success("Transação marcada como paga");
   };
 
+  const openPlannedCreate = (kind: "expense" | "income") => {
+    setPlannedKind(kind);
+    setPlannedEditing(null);
+    setPlannedDialogOpen(true);
+  };
+  const openPlannedEdit = (item: PlannedItemRow) => {
+    setPlannedKind(item.kind === "income" ? "income" : "expense");
+    setPlannedEditing(item);
+    setPlannedDialogOpen(true);
+  };
+  const openSchedule = (item: PlannedItemRow) => {
+    setScheduleTarget(item);
+    setScheduleDialogOpen(true);
+  };
+  const deletePlanned = async (item: PlannedItemRow) => {
+    const { error } = await supabase.from("planned_items").delete().eq("id", item.id);
+    if (error) {
+      toast.error(error.message || "Erro ao excluir");
+      return;
+    }
+    toast.success("Planejado excluído");
+    await loadData();
+  };
+
   return (
     <div className="space-y-6">
-      <div className="flex justify-end">
-        <Button onClick={openCreate} className="h-10 rounded-lg px-4 font-semibold">+ Nova Transação</Button>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="inline-flex rounded-lg bg-secondary/40 p-1">
+          <button
+            type="button"
+            onClick={() => setListView("transactions")}
+            className={cn("rounded-md px-4 py-1.5 text-sm font-semibold", listView === "transactions" ? "bg-primary text-primary-foreground" : "text-muted-foreground")}
+          >
+            Transações
+          </button>
+          <button
+            type="button"
+            onClick={() => setListView("planned")}
+            className={cn("rounded-md px-4 py-1.5 text-sm font-semibold", listView === "planned" ? "bg-primary text-primary-foreground" : "text-muted-foreground")}
+          >
+            Planejadas {plannedItems.length > 0 && <span className="ml-1 opacity-70">({plannedItems.length})</span>}
+          </button>
+        </div>
+
+        {listView === "transactions" ? (
+          <Button onClick={openCreate} className="h-10 rounded-lg px-4 font-semibold">+ Nova Transação</Button>
+        ) : (
+          <div className="flex gap-2">
+            <Button onClick={() => openPlannedCreate("expense")} variant="outline" className="h-10 rounded-lg px-3 font-semibold">+ Despesa</Button>
+            <Button onClick={() => openPlannedCreate("income")} variant="outline" className="h-10 rounded-lg px-3 font-semibold">+ Receita</Button>
+          </div>
+        )}
       </div>
 
+      {listView === "planned" ? (
+        <div className="space-y-4">
+          <div className="rounded-lg border border-info/30 bg-info/5 p-3 text-xs text-muted-foreground">
+            Despesas e receitas que você quer fazer no futuro mas <span className="font-semibold text-foreground">ainda sem data</span>. Não entram em Dashboard, Caixa Projetado, Agenda ou sino. Quando definir uma data, clique em Agendar para virar pendente.
+          </div>
+
+          {plannedItems.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-border bg-secondary/20 p-10 text-center">
+              <p className="text-base font-semibold text-foreground">Nenhuma transação planejada</p>
+              <p className="mt-1 text-sm text-muted-foreground">Adicione algo que você quer comprar ou receber sem precisar de data agora.</p>
+            </div>
+          ) : (
+            <Card className="rounded-lg border-border bg-card">
+              <CardContent className="p-0">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Descrição</TableHead>
+                      <TableHead>Tipo</TableHead>
+                      <TableHead className="text-right">Valor</TableHead>
+                      <TableHead>Data alvo</TableHead>
+                      <TableHead>Prioridade</TableHead>
+                      <TableHead className="text-right">Ações</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {plannedItems.map((item) => (
+                      <TableRow key={item.id} className="border-b border-border">
+                        <TableCell className="px-4 py-3 text-sm font-medium text-foreground">{item.description}</TableCell>
+                        <TableCell className="px-4 py-3 text-sm">
+                          <span className={cn("rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
+                            item.kind === "income" ? "bg-success/15 text-success" : "bg-destructive/15 text-destructive")}>
+                            {item.kind === "income" ? "Receita" : "Despesa"}
+                          </span>
+                        </TableCell>
+                        <TableCell className={cn("px-4 py-3 text-right text-sm font-semibold tabular-nums",
+                          item.kind === "income" ? "text-success" : "text-destructive")}>
+                          {item.kind === "income" ? "+" : "-"}{ptCurrency.format(item.amount)}
+                        </TableCell>
+                        <TableCell className="px-4 py-3 text-sm text-muted-foreground">
+                          {item.target_date ? new Date(`${item.target_date}T00:00:00`).toLocaleDateString("pt-BR") : <span className="opacity-50">—</span>}
+                        </TableCell>
+                        <TableCell className="px-4 py-3 text-sm text-muted-foreground">{priorityLabel[item.priority]}</TableCell>
+                        <TableCell className="px-4 py-3 text-right">
+                          <div className="flex justify-end gap-1">
+                            <Button size="sm" onClick={() => openSchedule(item)} className="h-8">Agendar</Button>
+                            <Button size="sm" variant="ghost" onClick={() => openPlannedEdit(item)} className="h-8 w-8 p-0"><Pencil className="h-3.5 w-3.5" /></Button>
+                            <Button size="sm" variant="ghost" onClick={() => void deletePlanned(item)} className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive"><Trash2 className="h-3.5 w-3.5" /></Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+          )}
+        </div>
+      ) : null}
+
+      {listView === "transactions" && (<>
       <div className="flex flex-wrap items-center gap-3">
         <div className="flex items-center justify-between rounded-xl border border-border bg-card px-2 py-1.5">
           <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setSelectedMonth((prev) => new Date(prev.getFullYear(), prev.getMonth() - 1, 1))}><ChevronLeft className="h-4 w-4" /></Button>
@@ -625,6 +744,22 @@ const TransactionsPage = () => {
           )}
         </CardContent>
       </Card>
+      </>)}
+
+      <PlannedItemDialog
+        open={plannedDialogOpen}
+        kind={plannedKind}
+        editing={plannedEditing}
+        onClose={() => setPlannedDialogOpen(false)}
+        onSaved={() => void loadData()}
+      />
+
+      <SchedulePlannedDialog
+        open={scheduleDialogOpen}
+        item={scheduleTarget}
+        onClose={() => setScheduleDialogOpen(false)}
+        onScheduled={() => void loadData()}
+      />
 
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-h-[90vh] max-w-[520px] overflow-y-auto rounded-2xl border-border bg-card p-6 shadow-2xl">
