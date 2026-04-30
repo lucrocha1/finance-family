@@ -178,7 +178,10 @@ const GoalsPage = () => {
     // rows whose family_id drifted from the current FamilyContext.
     const [categoriesRes, budgetsRes, txRes, goalsRes, contribRes] = await Promise.all([
       supabase.from("categories").select("id, name, color, icon, type").or("type.eq.expense,type.is.null").order("name", { ascending: true }),
-      supabase.from("budgets").select("id, category_id, amount, month, year, user_id, family_id").eq("month", month).eq("year", year),
+      // Limites valem do mês em que foram setados em diante (sticky).
+      // Carregamos todos até o mês selecionado e pegamos o mais recente
+      // por categoria no memo budgetByCategory.
+      supabase.from("budgets").select("id, category_id, amount, month, year, user_id, family_id"),
       supabase.from("transactions").select("category_id, amount, type, date").eq("type", "expense").gte("date", from).lte("date", to),
       supabase.from("goals").select("*").order("created_at", { ascending: false }),
       supabase.from("goal_contributions").select("*").order("date", { ascending: false }),
@@ -244,10 +247,21 @@ const GoalsPage = () => {
   const monthLabel = selectedMonth.toLocaleDateString("pt-BR", { month: "long", year: "numeric" }).replace(/^(.)/, (m) => m.toUpperCase());
 
   const budgetByCategory = useMemo(() => {
+    // Para cada categoria, pega o budget mais recente cuja (year, month)
+    // seja ≤ ao mês visualizado. Limite "vaza" pros meses seguintes até
+    // o usuário criar/editar um novo, replicando o comportamento de uma
+    // mensalidade que se mantém mês após mês.
     const map = new Map<string, BudgetRow>();
-    budgets.forEach((b) => map.set(b.category_id, b));
+    const cap = year * 12 + month;
+    budgets.forEach((b) => {
+      if (b.year * 12 + b.month > cap) return;
+      const current = map.get(b.category_id);
+      if (!current || (b.year * 12 + b.month) > (current.year * 12 + current.month)) {
+        map.set(b.category_id, b);
+      }
+    });
     return map;
-  }, [budgets]);
+  }, [budgets, month, year]);
 
   const budgetCards = useMemo(() => {
     const rows = categories.map((category) => {
@@ -324,6 +338,7 @@ const GoalsPage = () => {
 
     setSavingBudget(true);
     const existing = budgetByCategory.get(categoryId);
+    const existingIsThisMonth = existing && existing.year === year && existing.month === month;
 
     const payload = {
       family_id: family.id,
@@ -334,8 +349,12 @@ const GoalsPage = () => {
       year,
     };
 
-    const { error } = existing
-      ? await supabase.from("budgets").update({ amount }).eq("id", existing.id)
+    // Atualiza só se o limite vigente foi setado neste mês exato. Caso
+    // contrário (limite herdado de mês anterior), cria nova linha pra
+    // este mês — assim os meses passados mantêm o valor original e o
+    // novo passa a valer a partir do mês visualizado.
+    const { error } = existingIsThisMonth
+      ? await supabase.from("budgets").update({ amount }).eq("id", existing!.id)
       : await supabase.from("budgets").insert(payload);
 
     setSavingBudget(false);
