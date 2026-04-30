@@ -476,10 +476,15 @@ const DashboardPage = () => {
       .forEach(addTx);
 
     const total = [...grouped.values()].reduce((sum, item) => sum + item.value, 0);
-    const rows = [...grouped.values()]
-      .map((item) => ({ ...item, percentage: total > 0 ? (item.value / total) * 100 : 0 }))
-      .sort((a, b) => b.value - a.value);
-
+    const sorted = [...grouped.values()].sort((a, b) => b.value - a.value);
+    const TOP = 6;
+    const top = sorted.slice(0, TOP);
+    const rest = sorted.slice(TOP);
+    const rows = top.map((item) => ({ ...item, percentage: total > 0 ? (item.value / total) * 100 : 0 }));
+    if (rest.length > 0) {
+      const restValue = rest.reduce((sum, item) => sum + item.value, 0);
+      rows.push({ name: `Outros (${rest.length})`, value: restValue, color: "#6b7280", percentage: total > 0 ? (restValue / total) * 100 : 0 });
+    }
     return { rows, total };
   }, [cardTxsDueInMonth, categoriesTab, transactions]);
 
@@ -500,10 +505,15 @@ const DashboardPage = () => {
       });
 
     const total = [...grouped.values()].reduce((sum, item) => sum + item.value, 0);
-    const rows = [...grouped.values()]
-      .map((item) => ({ ...item, percentage: total > 0 ? (item.value / total) * 100 : 0 }))
-      .sort((a, b) => b.value - a.value);
-
+    const sorted = [...grouped.values()].sort((a, b) => b.value - a.value);
+    const TOP = 6;
+    const top = sorted.slice(0, TOP);
+    const rest = sorted.slice(TOP);
+    const rows = top.map((item) => ({ ...item, percentage: total > 0 ? (item.value / total) * 100 : 0 }));
+    if (rest.length > 0) {
+      const restValue = rest.reduce((sum, item) => sum + item.value, 0);
+      rows.push({ name: `Outros (${rest.length})`, value: restValue, color: "#6b7280", percentage: total > 0 ? (restValue / total) * 100 : 0 });
+    }
     return { rows, total };
   }, [incomeTab, transactions]);
 
@@ -673,14 +683,14 @@ const DashboardPage = () => {
             <div className="flex-1 space-y-2">
               {donutData.rows.length ? (
                 donutData.rows.map((item) => (
-                  <div key={item.name} className="flex items-center justify-between gap-3 rounded-lg border border-border bg-secondary/20 px-3 py-2">
+                  <div key={item.name} className="flex items-center justify-between gap-3 rounded-lg border border-border bg-secondary/20 px-3 py-1.5">
                     <div className="flex min-w-0 flex-1 items-center gap-2">
                       <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: item.color }} />
                       <span className="truncate text-sm text-foreground">{item.name}</span>
                     </div>
-                    <div className="shrink-0 text-right">
-                      <p className="text-sm font-semibold tabular-nums text-foreground">{ptCurrency.format(item.value)}</p>
-                      <p className="text-xs tabular-nums text-muted-foreground">{item.percentage.toFixed(1)}%</p>
+                    <div className="flex shrink-0 items-baseline gap-2 tabular-nums">
+                      <span className="text-sm font-semibold text-foreground">{ptCurrency.format(item.value)}</span>
+                      <span className="text-xs text-muted-foreground">{item.percentage.toFixed(1)}%</span>
                     </div>
                   </div>
                 ))
@@ -727,14 +737,14 @@ const DashboardPage = () => {
             <div className="flex-1 space-y-2">
               {incomeDonutData.rows.length ? (
                 incomeDonutData.rows.map((item) => (
-                  <div key={item.name} className="flex items-center justify-between gap-3 rounded-lg border border-border bg-secondary/20 px-3 py-2">
+                  <div key={item.name} className="flex items-center justify-between gap-3 rounded-lg border border-border bg-secondary/20 px-3 py-1.5">
                     <div className="flex min-w-0 flex-1 items-center gap-2">
                       <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: item.color }} />
                       <span className="truncate text-sm text-foreground">{item.name}</span>
                     </div>
-                    <div className="shrink-0 text-right">
-                      <p className="text-sm font-semibold tabular-nums text-foreground">{ptCurrency.format(item.value)}</p>
-                      <p className="text-xs tabular-nums text-muted-foreground">{item.percentage.toFixed(1)}%</p>
+                    <div className="flex shrink-0 items-baseline gap-2 tabular-nums">
+                      <span className="text-sm font-semibold text-foreground">{ptCurrency.format(item.value)}</span>
+                      <span className="text-xs text-muted-foreground">{item.percentage.toFixed(1)}%</span>
                     </div>
                   </div>
                 ))
