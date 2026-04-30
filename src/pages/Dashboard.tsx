@@ -670,17 +670,17 @@ const DashboardPage = () => {
               </div>
             </div>
 
-            <div className="max-h-[220px] flex-1 space-y-2 overflow-y-auto pr-1">
+            <div className="flex-1 space-y-2">
               {donutData.rows.length ? (
                 donutData.rows.map((item) => (
-                  <div key={item.name} className="flex items-center justify-between rounded-lg border border-border bg-secondary/20 px-3 py-2">
-                    <div className="flex items-center gap-2">
-                      <span className="h-2 w-2 rounded-full" style={{ backgroundColor: item.color }} />
-                      <span className="text-sm text-foreground">{item.name}</span>
+                  <div key={item.name} className="flex items-center justify-between gap-3 rounded-lg border border-border bg-secondary/20 px-3 py-2">
+                    <div className="flex min-w-0 flex-1 items-center gap-2">
+                      <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: item.color }} />
+                      <span className="truncate text-sm text-foreground">{item.name}</span>
                     </div>
-                    <div className="text-right">
-                      <p className="text-sm font-semibold text-foreground">{ptCurrency.format(item.value)}</p>
-                      <p className="text-xs text-muted-foreground">{item.percentage.toFixed(1)}%</p>
+                    <div className="shrink-0 text-right">
+                      <p className="text-sm font-semibold tabular-nums text-foreground">{ptCurrency.format(item.value)}</p>
+                      <p className="text-xs tabular-nums text-muted-foreground">{item.percentage.toFixed(1)}%</p>
                     </div>
                   </div>
                 ))
@@ -724,17 +724,17 @@ const DashboardPage = () => {
               </div>
             </div>
 
-            <div className="max-h-[220px] flex-1 space-y-2 overflow-y-auto pr-1">
+            <div className="flex-1 space-y-2">
               {incomeDonutData.rows.length ? (
                 incomeDonutData.rows.map((item) => (
-                  <div key={item.name} className="flex items-center justify-between rounded-lg border border-border bg-secondary/20 px-3 py-2">
-                    <div className="flex items-center gap-2">
-                      <span className="h-2 w-2 rounded-full" style={{ backgroundColor: item.color }} />
-                      <span className="text-sm text-foreground">{item.name}</span>
+                  <div key={item.name} className="flex items-center justify-between gap-3 rounded-lg border border-border bg-secondary/20 px-3 py-2">
+                    <div className="flex min-w-0 flex-1 items-center gap-2">
+                      <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: item.color }} />
+                      <span className="truncate text-sm text-foreground">{item.name}</span>
                     </div>
-                    <div className="text-right">
-                      <p className="text-sm font-semibold text-foreground">{ptCurrency.format(item.value)}</p>
-                      <p className="text-xs text-muted-foreground">{item.percentage.toFixed(1)}%</p>
+                    <div className="shrink-0 text-right">
+                      <p className="text-sm font-semibold tabular-nums text-foreground">{ptCurrency.format(item.value)}</p>
+                      <p className="text-xs tabular-nums text-muted-foreground">{item.percentage.toFixed(1)}%</p>
                     </div>
                   </div>
                 ))
