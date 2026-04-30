@@ -333,10 +333,11 @@ const totalBankBalance = useMemo(() => accounts.reduce((sum, account) => sum + N
       const cycle = getInvoiceCycleForMonth(closingDay, dueDay, monthStart.getFullYear(), monthStart.getMonth());
       const cycleStartIso = toISODate(cycle.cycleStart);
       const cycleEndIso = toISODate(cycle.cycleEnd);
-      cardTransactions
-        .filter((tx) => tx.card_id === card.id && tx.date >= cycleStartIso && tx.date <= cycleEndIso)
-        .forEach((tx) => result.push(tx));
+      const inCycle = cardTransactions.filter((tx) => tx.card_id === card.id && tx.date >= cycleStartIso && tx.date <= cycleEndIso);
+      console.info(`[Dashboard] cycle ${card.name} ${cycleStartIso} → ${cycleEndIso}: ${inCycle.length} txs`, inCycle.map((t) => ({ date: t.date, amount: t.amount, status: t.status, cat: t.category_id })));
+      inCycle.forEach((tx) => result.push(tx));
     });
+    console.info("[Dashboard] cardTxsDueInMonth total:", result.length);
     return result;
   }, [cards, cardTransactions, monthStart]);
 
