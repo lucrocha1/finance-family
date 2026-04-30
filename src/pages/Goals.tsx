@@ -180,11 +180,15 @@ const GoalsPage = () => {
       supabase.from("categories").select("id, name, color, icon, type").or("type.eq.expense,type.is.null").order("name", { ascending: true }),
       supabase.from("budgets").select("id, category_id, amount, month, year, user_id, family_id").eq("month", month).eq("year", year),
       supabase.from("transactions").select("category_id, amount, type, date").eq("type", "expense").gte("date", from).lte("date", to),
-      supabase.from("goals").select("id, user_id, family_id, name, emoji, color, target_amount, current_amount, target_date, description, status, created_at").order("created_at", { ascending: false }),
-      supabase.from("goal_contributions").select("id, goal_id, user_id, family_id, amount, date, notes").order("date", { ascending: false }),
+      supabase.from("goals").select("*").order("created_at", { ascending: false }),
+      supabase.from("goal_contributions").select("*").order("date", { ascending: false }),
     ]);
 
-    if (categoriesRes.error || budgetsRes.error || txRes.error || goalsRes.error || contribRes.error) {
+    // Goals/contrib errors são tolerados — a aba Orçamento não depende deles.
+    if (goalsRes.error) console.warn("[Goals] goals query failed:", goalsRes.error);
+    if (contribRes.error) console.warn("[Goals] goal_contributions query failed:", contribRes.error);
+
+    if (categoriesRes.error || budgetsRes.error || txRes.error) {
       toast.error("Erro ao carregar Metas & Orçamento");
       setLoading(false);
       return;
