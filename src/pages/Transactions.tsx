@@ -33,6 +33,7 @@ import { toast } from "@/components/ui/sonner";
 import { useAuth } from "@/contexts/AuthContext";
 import { useFamily } from "@/contexts/FamilyContext";
 import { supabase } from "@/integrations/supabase/client";
+import { buildCSV, downloadCSV } from "@/lib/csvExport";
 import { ensureFamily } from "@/lib/familyGuard";
 import { priorityLabel, type PlannedItemRow } from "@/lib/plannedItems";
 import { PlannedItemDialog } from "@/components/PlannedItemDialog";
@@ -338,6 +339,42 @@ const TransactionsPage = () => {
     return Boolean(categoryId && (cardId !== "none" || accountId));
   }, [accountId, amountCents, cardId, categoryId, description, formType, fromAccountId, toAccountId]);
 
+  const exportTransactionsCSV = () => {
+    if (filtered.length === 0) {
+      toast.error("Sem transações no período pra exportar");
+      return;
+    }
+    const rows = filtered.map((tx) => {
+      const cat = asSingle(tx.categories);
+      const acc = asSingle(tx.accounts);
+      const card = asSingle(tx.cards);
+      return {
+        date: formatDateDDMM(tx.date),
+        description: tx.description ?? "",
+        type: tx.type === "income" ? "Receita" : tx.type === "expense" ? "Despesa" : "Transferência",
+        amount: Number(tx.amount || 0).toFixed(2).replace(".", ","),
+        category: cat?.name ?? "",
+        account: acc?.name ?? "",
+        card: card?.name ?? "",
+        status: tx.status === "paid" ? "Pago" : "Pendente",
+        notes: tx.notes ?? "",
+      };
+    });
+    const csv = buildCSV(rows, [
+      { key: "date", label: "Data" },
+      { key: "description", label: "Descrição" },
+      { key: "type", label: "Tipo" },
+      { key: "amount", label: "Valor" },
+      { key: "category", label: "Categoria" },
+      { key: "account", label: "Conta" },
+      { key: "card", label: "Cartão" },
+      { key: "status", label: "Status" },
+      { key: "notes", label: "Notas" },
+    ]);
+    downloadCSV(csv, `transacoes_${formatMonthYear(selectedMonth).replace(/\s+/g, "_")}.csv`);
+    toast.success(`${rows.length} transações exportadas`);
+  };
+
   const persist = async () => {
     const ctx = ensureFamily(family?.id, user?.id);
     if (!ctx) return;
@@ -595,7 +632,12 @@ const TransactionsPage = () => {
         </div>
 
         {listView === "transactions" ? (
-          <Button onClick={openCreate} className="h-10 rounded-lg px-4 font-semibold">+ Nova Transação</Button>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={exportTransactionsCSV} className="h-10 rounded-lg" aria-label="Exportar CSV">
+              Exportar CSV
+            </Button>
+            <Button onClick={openCreate} className="h-10 rounded-lg px-4 font-semibold">+ Nova Transação</Button>
+          </div>
         ) : (
           <div className="flex gap-2">
             <Button onClick={() => openPlannedCreate("expense")} variant="outline" className="h-10 rounded-lg px-3 font-semibold">+ Despesa</Button>

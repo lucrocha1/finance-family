@@ -59,9 +59,47 @@ const SetupFamilyPage = () => {
       return;
     }
 
+    // Popula categorias padrão pra o user não começar com lista vazia.
+    await seedDefaultCategories();
+
     markFamilyLinked();
     void refreshProfile();
     navigate("/dashboard", { replace: true });
+  };
+
+  const seedDefaultCategories = async () => {
+    const { data: userData } = await supabase.auth.getUser();
+    const userId = userData?.user?.id;
+    if (!userId) return;
+    const { data: profile } = await supabase.from("profiles").select("family_id").eq("id", userId).maybeSingle();
+    const familyId = (profile as { family_id: string | null } | null)?.family_id;
+    if (!familyId) return;
+
+    const expense = [
+      { name: "Mercado", icon: "🛒", color: "#22c55e" },
+      { name: "Transporte", icon: "🚗", color: "#3b82f6" },
+      { name: "Alimentação", icon: "🍔", color: "#f97316" },
+      { name: "Moradia", icon: "🏠", color: "#a855f7" },
+      { name: "Saúde", icon: "💊", color: "#ef4444" },
+      { name: "Lazer", icon: "🎮", color: "#ec4899" },
+      { name: "Educação", icon: "📚", color: "#0ea5e9" },
+      { name: "Vestuário", icon: "👕", color: "#eab308" },
+      { name: "Utilidades", icon: "💡", color: "#14b8a6" },
+      { name: "Outros", icon: "📦", color: "#6b7280" },
+    ];
+    const income = [
+      { name: "Salário", icon: "💼", color: "#10b981" },
+      { name: "Freelance", icon: "💻", color: "#06b6d4" },
+      { name: "Investimentos", icon: "📈", color: "#8b5cf6" },
+      { name: "Outros", icon: "🎁", color: "#94a3b8" },
+    ];
+
+    const rows = [
+      ...expense.map((c) => ({ ...c, type: "expense", user_id: userId, family_id: familyId })),
+      ...income.map((c) => ({ ...c, type: "income", user_id: userId, family_id: familyId })),
+    ];
+
+    await supabase.from("categories").insert(rows);
   };
 
   const handleJoinFamily = async (event: FormEvent<HTMLFormElement>) => {

@@ -29,6 +29,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { GlobalSearch } from "@/components/GlobalSearch";
 import { useAuth } from "@/contexts/AuthContext";
 import { useFamily } from "@/contexts/FamilyContext";
 import { useTheme } from "@/contexts/ThemeContext";
@@ -146,6 +147,7 @@ export const AppLayout = () => {
 
   return (
     <div className="min-h-screen">
+      <GlobalSearch />
       {isMobile && mobileOpen && (
         <button
           aria-label="Fechar menu"
