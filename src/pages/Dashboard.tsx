@@ -198,7 +198,7 @@ const DashboardPage = () => {
   const [accounts, setAccounts] = useState<AccountRow[]>([]);
   const [cards, setCards] = useState<CardRow[]>([]);
   const [cardCommitments, setCardCommitments] = useState<Pick<TransactionRow, "card_id" | "amount" | "type">[]>([]);
-  const [cardTransactions, setCardTransactions] = useState<Pick<TransactionRow, "card_id" | "amount" | "date" | "status">[]>([]);
+  const [cardTransactions, setCardTransactions] = useState<Pick<TransactionRow, "card_id" | "amount" | "date" | "status" | "category_id" | "categories">[]>([]);
   const [scheduledMonth, setScheduledMonth] = useState<ScheduledPaymentRow[]>([]);
   const [scheduledWeek, setScheduledWeek] = useState<ScheduledPaymentRow[]>([]);
 
@@ -266,10 +266,12 @@ const DashboardPage = () => {
           .neq("status", "paid")
           .not("card_id", "is", null),
         // Todas as despesas no cartão num range amplo (-60d a +90d) para
-        // calcular ciclos de fatura abertos / próximos.
+        // calcular ciclos de fatura abertos / próximos. Inclui categoria
+        // para o donut "A Pagar" agrupar por categoria mesmo quando a
+        // fatura é o que vai pesar no mês.
         supabase
           .from("transactions")
-          .select("card_id, amount, date, status")
+          .select("card_id, amount, date, status, category_id, categories(id, name, color, icon)")
           .eq("family_id", family.id)
           .eq("type", "expense")
           .not("card_id", "is", null)
@@ -282,7 +284,7 @@ const DashboardPage = () => {
       setAccounts((accountsRes.data as AccountRow[] | null) ?? []);
       setCards((cardsRes.data as CardRow[] | null) ?? []);
       setCardCommitments((cardCommitRes.data as Pick<TransactionRow, "card_id" | "amount" | "type">[] | null) ?? []);
-      setCardTransactions((cardTxRes.data as Pick<TransactionRow, "card_id" | "amount" | "date" | "status">[] | null) ?? []);
+      setCardTransactions((cardTxRes.data as Pick<TransactionRow, "card_id" | "amount" | "date" | "status" | "category_id" | "categories">[] | null) ?? []);
       setScheduledMonth((schedMonthRes.data as ScheduledPaymentRow[] | null) ?? []);
       setScheduledWeek((schedWeekRes.data as ScheduledPaymentRow[] | null) ?? []);
       setLoading(false);
@@ -292,16 +294,22 @@ const DashboardPage = () => {
   }, [family?.id, monthEnd, monthStart, prevMonthEnd, prevMonthStart, weekEnd, weekStart]);
 
   const totals = useMemo(() => {
-    // Fluxo de caixa = só conta o que realmente passa pela conta bancária.
-    // Despesas de cartão entram no fluxo apenas quando a fatura é paga
-    // (via "Pagar Fatura", que gera uma transação sem card_id).
+    // Fluxo do período = movimentos do mês visualizado pela ótica do caixa:
+    // - Receitas/despesas não-cartão (paid+pending)
+    // - Faturas de cartão pendentes a vencer no mês (projetadas)
+    // - Faturas pagas via "Pagar Fatura" já entram via a transação
+    //   "Pagamento Fatura" com card_id=null no filtro acima.
     const isCash = (tx: TransactionRow) => !tx.card_id;
     const income = transactions.filter((tx) => tx.type === "income" && isCash(tx)).reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
-    const expense = transactions.filter((tx) => tx.type === "expense" && isCash(tx)).reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+    const expenseDirect = transactions.filter((tx) => tx.type === "expense" && isCash(tx)).reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+    const expenseCardPending = cardTxsDueInMonth
+      .filter((tx) => tx.status !== "paid")
+      .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+    const expense = expenseDirect + expenseCardPending;
     const previousIncome = previousTransactions.filter((tx) => tx.type === "income" && isCash(tx)).reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
     const previousExpense = previousTransactions.filter((tx) => tx.type === "expense" && isCash(tx)).reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
     return { income, expense, balance: income - expense, previousBalance: previousIncome - previousExpense };
-  }, [previousTransactions, transactions]);
+  }, [cardTxsDueInMonth, previousTransactions, transactions]);
 
   const balanceVariation = useMemo(() => {
     const current = totals.balance;
@@ -312,6 +320,25 @@ const DashboardPage = () => {
   }, [totals.balance, totals.previousBalance]);
 
 const totalBankBalance = useMemo(() => accounts.reduce((sum, account) => sum + Number(account.balance || 0), 0), [accounts]);
+
+  // Transações de cartão cuja fatura VENCE no mês visualizado, separadas
+  // por status. Usadas para popular o donut "A Pagar" (pending) e "Pago"
+  // (paid) com as categorias originais das compras.
+  const cardTxsDueInMonth = useMemo(() => {
+    const result: Array<typeof cardTransactions[number]> = [];
+    cards.forEach((card) => {
+      const closingDay = Number(card.closing_day || 0);
+      const dueDay = Number(card.due_day || 0);
+      if (!closingDay || !dueDay) return;
+      const cycle = getInvoiceCycleForMonth(closingDay, dueDay, monthStart.getFullYear(), monthStart.getMonth());
+      const cycleStartIso = toISODate(cycle.cycleStart);
+      const cycleEndIso = toISODate(cycle.cycleEnd);
+      cardTransactions
+        .filter((tx) => tx.card_id === card.id && tx.date >= cycleStartIso && tx.date <= cycleEndIso)
+        .forEach((tx) => result.push(tx));
+    });
+    return result;
+  }, [cards, cardTransactions, monthStart]);
 
   // Faturas de cartão que vencem no mês visível, tratadas como UMA despesa
   // pendente única na data de vencimento. Se a fatura já foi paga (via
@@ -426,26 +453,31 @@ const totalBankBalance = useMemo(() => accounts.reduce((sum, account) => sum + N
 
   const donutData = useMemo(() => {
     const grouped = new Map<string, { name: string; value: number; color: string }>();
+    const addTx = (tx: { amount: number; category_id?: string | null; categories?: TransactionRow["categories"] }) => {
+      const rawCategory = Array.isArray(tx.categories) ? tx.categories[0] : tx.categories;
+      const key = tx.category_id || rawCategory?.id || "sem_categoria";
+      const name = rawCategory?.name || "Sem categoria";
+      const color = rawCategory?.color || "#6b7280";
+      const value = Number(tx.amount || 0);
+      const current = grouped.get(key);
+      if (current) current.value += value;
+      else grouped.set(key, { name, value, color });
+    };
+
+    // Despesas não-cartão do mês visível.
     transactions
-      .filter((tx) => tx.type === "expense")
-      // Compras no cartão são categorizadas, mas o "A Pagar" representa
-      // saídas reais do caixa no mês. Cartão sai do caixa via fatura — então
-      // não somamos a compra individual aqui. Em "Pago" elas também ficam de
-      // fora porque ainda não foram pagas (status="pending"); quando o user
-      // paga a fatura, todas viram "paid" e mesmo assim não somamos (a saída
-      // real de caixa é o "Pagamento Fatura" que NÃO tem card_id).
-      .filter((tx) => !tx.card_id)
+      .filter((tx) => tx.type === "expense" && !tx.card_id)
       .filter((tx) => (categoriesTab === "paid" ? tx.status === "paid" : tx.status === "pending"))
-      .forEach((tx) => {
-        const rawCategory = Array.isArray(tx.categories) ? tx.categories[0] : tx.categories;
-        const key = tx.category_id || rawCategory?.id || "sem_categoria";
-        const name = rawCategory?.name || "Sem categoria";
-        const color = rawCategory?.color || "#6b7280";
-        const value = Number(tx.amount || 0);
-        const current = grouped.get(key);
-        if (current) current.value += value;
-        else grouped.set(key, { name, value, color });
-      });
+      .forEach(addTx);
+
+    // Despesas de cartão cuja fatura VENCE no mês visualizado, agrupadas
+    // pelas categorias das compras (não pelo cartão). Pago/A Pagar é
+    // determinado pelo status: paid (fatura quitada) vs pending (fatura
+    // ainda aberta). Isso garante que faturas a vencer apareçam em
+    // "A Pagar" e faturas pagas via "Pagar Fatura" apareçam em "Pago".
+    cardTxsDueInMonth
+      .filter((tx) => (categoriesTab === "paid" ? tx.status === "paid" : tx.status !== "paid"))
+      .forEach(addTx);
 
     const total = [...grouped.values()].reduce((sum, item) => sum + item.value, 0);
     const rows = [...grouped.values()]
@@ -453,7 +485,7 @@ const totalBankBalance = useMemo(() => accounts.reduce((sum, account) => sum + N
       .sort((a, b) => b.value - a.value);
 
     return { rows, total };
-  }, [categoriesTab, transactions]);
+  }, [cardTxsDueInMonth, categoriesTab, transactions]);
 
   const incomeDonutData = useMemo(() => {
     const grouped = new Map<string, { name: string; value: number; color: string }>();
@@ -619,18 +651,18 @@ const totalBankBalance = useMemo(() => accounts.reduce((sum, account) => sum + N
               </div>
             </div>
           </CardHeader>
-          <CardContent className="flex flex-col gap-4 lg:flex-row">
-            <div className="relative h-[220px] w-full lg:w-1/2">
+          <CardContent className="flex flex-col gap-4 xl:flex-row">
+            <div className="relative mx-auto aspect-square h-[220px] w-full max-w-[220px] xl:mx-0">
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   {donutData.rows.length ? (
-                    <Pie data={donutData.rows} dataKey="value" nameKey="name" innerRadius={60} outerRadius={90} paddingAngle={2} stroke="none">
+                    <Pie data={donutData.rows} dataKey="value" nameKey="name" innerRadius="55%" outerRadius="85%" paddingAngle={2} stroke="none">
                       {donutData.rows.map((entry, idx) => (
                         <Cell key={`${entry.name}-${idx}`} fill={entry.color} />
                       ))}
                     </Pie>
                   ) : (
-                    <Pie data={[{ value: 1 }]} dataKey="value" innerRadius={60} outerRadius={90} stroke="none" fill="hsl(var(--border))" />
+                    <Pie data={[{ value: 1 }]} dataKey="value" innerRadius="55%" outerRadius="85%" stroke="none" fill="hsl(var(--border))" />
                   )}
                   <Tooltip content={<DonutTooltip />} cursor={false} offset={16} wrapperStyle={{ outline: "none" }} />
                 </PieChart>
@@ -673,18 +705,18 @@ const totalBankBalance = useMemo(() => accounts.reduce((sum, account) => sum + N
               </div>
             </div>
           </CardHeader>
-          <CardContent className="flex flex-col gap-4 lg:flex-row">
-            <div className="relative h-[220px] w-full lg:w-1/2">
+          <CardContent className="flex flex-col gap-4 xl:flex-row">
+            <div className="relative mx-auto aspect-square h-[220px] w-full max-w-[220px] xl:mx-0">
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   {incomeDonutData.rows.length ? (
-                    <Pie data={incomeDonutData.rows} dataKey="value" nameKey="name" innerRadius={60} outerRadius={90} paddingAngle={2} stroke="none">
+                    <Pie data={incomeDonutData.rows} dataKey="value" nameKey="name" innerRadius="55%" outerRadius="85%" paddingAngle={2} stroke="none">
                       {incomeDonutData.rows.map((entry, idx) => (
                         <Cell key={`${entry.name}-${idx}`} fill={entry.color} />
                       ))}
                     </Pie>
                   ) : (
-                    <Pie data={[{ value: 1 }]} dataKey="value" innerRadius={60} outerRadius={90} stroke="none" fill="hsl(var(--border))" />
+                    <Pie data={[{ value: 1 }]} dataKey="value" innerRadius="55%" outerRadius="85%" stroke="none" fill="hsl(var(--border))" />
                   )}
                   <Tooltip content={<DonutTooltip />} cursor={false} offset={16} wrapperStyle={{ outline: "none" }} />
                 </PieChart>
