@@ -62,6 +62,18 @@ export const schedulePlannedTransaction = async (
   const del = await supabase.from("planned_items").delete().eq("id", item.id);
   if (del.error) return { ok: false, message: del.error.message };
 
+  void supabase.from("notifications").insert({
+    user_id: ctx.userId,
+    family_id: ctx.familyId,
+    kind: "planned_scheduled",
+    severity: "celebrate",
+    title: `Planejado virou pendente — ${item.description}`,
+    body: `${item.kind === "income" ? "Receita" : "Despesa"} agendada para ${new Date(`${date}T00:00:00`).toLocaleDateString("pt-BR")}.`,
+    link_to: "/transactions",
+    metadata: { transaction_id: String(data.id), planned_item_id: item.id },
+    dedup_key: `planned_scheduled:${item.id}`,
+  });
+
   return { ok: true, transactionId: String(data.id) };
 };
 
@@ -96,6 +108,18 @@ export const schedulePlannedInvestment = async (
 
   const del = await supabase.from("planned_items").delete().eq("id", item.id);
   if (del.error) return { ok: false, message: del.error.message };
+
+  void supabase.from("notifications").insert({
+    user_id: ctx.userId,
+    family_id: ctx.familyId,
+    kind: "planned_scheduled",
+    severity: "celebrate",
+    title: `Investimento agendado — ${item.description}`,
+    body: `Aporte de ${new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(item.amount)} para ${new Date(`${date}T00:00:00`).toLocaleDateString("pt-BR")}.`,
+    link_to: "/investments",
+    metadata: { investment_id: String(data.id), planned_item_id: item.id },
+    dedup_key: `planned_scheduled:${item.id}`,
+  });
 
   return { ok: true, investmentId: String(data.id) };
 };

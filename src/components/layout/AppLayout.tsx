@@ -32,8 +32,9 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { useAuth } from "@/contexts/AuthContext";
 import { useFamily } from "@/contexts/FamilyContext";
 import { useTheme } from "@/contexts/ThemeContext";
+import { useEnsureNotificationsGenerated } from "@/hooks/useEnsureNotificationsGenerated";
 import { useEnsureRecurrencesGenerated } from "@/hooks/useEnsureRecurrencesGenerated";
-import { useUpcomingDueDates } from "@/hooks/useUpcomingDueDates";
+import { useNotifications, type NotificationSeverity } from "@/hooks/useNotifications";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
@@ -70,7 +71,8 @@ export const AppLayout = () => {
   const isMobile = useIsMobile();
 
   useEnsureRecurrencesGenerated(family?.id);
-  const { items: dueItems, count: dueCount } = useUpcomingDueDates(family?.id);
+  useEnsureNotificationsGenerated(user?.id);
+  const { items: notifications, unreadCount, markAsRead, markAllAsRead } = useNotifications(user?.id);
 
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -228,36 +230,52 @@ export const AppLayout = () => {
               <DropdownMenuTrigger asChild>
                 <button type="button" className="relative text-muted-foreground transition-colors hover:text-foreground" aria-label="Notificações">
                   <Bell className="h-5 w-5" />
-                  {dueCount > 0 && (
+                  {unreadCount > 0 && (
                     <span className="absolute -right-1.5 -top-1.5 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-bold text-destructive-foreground">
-                      {dueCount > 9 ? "9+" : dueCount}
+                      {unreadCount > 9 ? "9+" : unreadCount}
                     </span>
                   )}
                 </button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-80 rounded-xl border-border bg-card p-2 text-card-foreground shadow-2xl">
-                <div className="px-2 py-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Vencimentos · próximos 7 dias</div>
-                {dueItems.length === 0 ? (
-                  <div className="px-3 py-6 text-center text-sm text-muted-foreground">Nada vencendo nos próximos dias</div>
+              <DropdownMenuContent align="end" className="w-96 rounded-xl border-border bg-card p-2 text-card-foreground shadow-2xl">
+                <div className="flex items-center justify-between px-2 py-1.5">
+                  <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Notificações</span>
+                  {unreadCount > 0 && (
+                    <button type="button" onClick={() => void markAllAsRead()} className="text-xs font-semibold text-primary hover:underline">
+                      Marcar todas
+                    </button>
+                  )}
+                </div>
+                {notifications.length === 0 ? (
+                  <div className="px-3 py-8 text-center text-sm text-muted-foreground">Sem notificações por enquanto</div>
                 ) : (
-                  <div className="max-h-80 space-y-1 overflow-y-auto">
-                    {dueItems.slice(0, 12).map((item) => (
-                      <button
-                        key={item.id}
-                        type="button"
-                        onClick={() => navigate(item.routeTarget ?? "/schedule")}
-                        className="flex w-full items-start justify-between gap-3 rounded-lg px-3 py-2 text-left hover:bg-secondary"
-                      >
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate text-sm font-medium text-foreground">{item.description}</p>
-                          <p className="text-xs text-muted-foreground">{new Date(`${item.date}T00:00:00`).toLocaleDateString("pt-BR", { day: "2-digit", month: "short" })}</p>
-                        </div>
-                        <span className={cn("shrink-0 text-sm font-semibold tabular-nums", item.type === "income" ? "text-success" : "text-destructive")}>
-                          {item.type === "income" ? "+" : "-"}
-                          {new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(item.amount)}
-                        </span>
-                      </button>
-                    ))}
+                  <div className="max-h-96 space-y-1 overflow-y-auto">
+                    {notifications.slice(0, 12).map((item) => {
+                      const sev: NotificationSeverity = item.severity;
+                      const dotColor =
+                        sev === "danger" ? "bg-destructive" :
+                        sev === "warning" ? "bg-warning" :
+                        sev === "celebrate" ? "bg-success" :
+                        "bg-info";
+                      return (
+                        <button
+                          key={item.id}
+                          type="button"
+                          onClick={() => {
+                            void markAsRead(item.id);
+                            if (item.link_to) navigate(item.link_to);
+                          }}
+                          className={cn("flex w-full items-start gap-3 rounded-lg px-3 py-2 text-left hover:bg-secondary", item.read_at && "opacity-60")}
+                        >
+                          <span className={cn("mt-1.5 h-2 w-2 shrink-0 rounded-full", dotColor)} />
+                          <div className="min-w-0 flex-1">
+                            <p className={cn("truncate text-sm", item.read_at ? "font-normal" : "font-semibold", "text-foreground")}>{item.title}</p>
+                            {item.body && <p className="line-clamp-2 text-xs text-muted-foreground">{item.body}</p>}
+                            <p className="mt-1 text-[10px] text-muted-foreground">{new Date(item.created_at).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })}</p>
+                          </div>
+                        </button>
+                      );
+                    })}
                   </div>
                 )}
               </DropdownMenuContent>
