@@ -18,6 +18,7 @@ import {
 import { z } from "zod";
 
 import { PageSkeleton } from "@/components/PageSkeleton";
+import { TagsInput } from "@/components/TagsInput";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import { Card, CardContent } from "@/components/ui/card";
@@ -170,6 +171,7 @@ const TransactionsPage = () => {
   const [installments, setInstallments] = useState(2);
   const [isRecurring, setIsRecurring] = useState(false);
   const [recurrenceType, setRecurrenceType] = useState<RecurrenceType>("monthly");
+  const [tags, setTags] = useState<string[]>([]);
   const [notes, setNotes] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
 
@@ -301,6 +303,7 @@ const TransactionsPage = () => {
     setInstallments(2);
     setIsRecurring(false);
     setRecurrenceType("monthly");
+    setTags([]);
     setNotes("");
     setFormError(null);
   };
@@ -328,6 +331,7 @@ const TransactionsPage = () => {
     setInstallments(tx.installment_total ?? 2);
     setIsRecurring(Boolean(tx.is_recurring));
     setRecurrenceType(((tx.recurrence_type as RecurrenceType) || "monthly") as RecurrenceType);
+    setTags(Array.isArray((tx as { tags?: string[] }).tags) ? (tx as { tags: string[] }).tags : []);
     setNotes(tx.notes ?? "");
     setOpen(true);
   };
@@ -416,6 +420,7 @@ const TransactionsPage = () => {
       amount: parsed.data.amountCents / 100,
       date: parsed.data.date,
       notes: parsed.data.notes?.trim() || null,
+      tags,
       status: baseStatus,
       category_id: parsed.data.type === "transfer" ? null : parsed.data.categoryId,
       account_id: parsed.data.type === "transfer" ? parsed.data.fromAccountId : parsed.data.type === "expense" && parsed.data.cardId ? null : parsed.data.accountId,
@@ -923,6 +928,7 @@ const TransactionsPage = () => {
               </div>
             )}
 
+            <div className="space-y-2"><Label className="text-xs text-muted-foreground">Tags (opcional)</Label><TagsInput value={tags} onChange={setTags} placeholder="ex: trabalho, viagem, presente" /></div>
             <div className="space-y-2"><Label className="text-xs text-muted-foreground">Notas</Label><Textarea value={notes} onChange={(e) => setNotes(e.target.value.slice(0, 600))} rows={3} className="resize-y rounded-lg border-border bg-secondary text-foreground" /></div>
             {formError && <p className="text-sm text-destructive">{formError}</p>}
 
