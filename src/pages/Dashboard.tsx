@@ -296,6 +296,22 @@ const DashboardPage = () => {
 
 const totalBankBalance = useMemo(() => accounts.reduce((sum, account) => sum + Number(account.balance || 0), 0), [accounts]);
 
+  // Caixa projetado = saldo na conta hoje + (receitas pendentes - despesas pendentes)
+  // não-cartão no período. Compras de cartão entram via fatura, então não somamos
+  // aqui — o que reduz o caixa é o pagamento da fatura quando vence (o evento já
+  // está no fluxo do período se foi marcado pendente).
+  const projectedCash = useMemo(() => {
+    const pendingIncome = transactions
+      .filter((tx) => tx.type === "income" && tx.status !== "paid" && !tx.card_id)
+      .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+    const pendingExpense = transactions
+      .filter((tx) => tx.type === "expense" && tx.status !== "paid" && !tx.card_id)
+      .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+    return totalBankBalance + pendingIncome - pendingExpense;
+  }, [transactions, totalBankBalance]);
+
+  const projectedDelta = projectedCash - totalBankBalance;
+
   const quickSummary = useMemo(() => {
     const pendingInMonth = scheduledMonth.filter((item) => !item.is_paid);
     const predictedIncome = pendingInMonth.filter((item) => item.type === "income").reduce((sum, item) => sum + Number(item.amount || 0), 0);
@@ -508,6 +524,30 @@ const totalBankBalance = useMemo(() => accounts.reduce((sum, account) => sum + N
           </div>
         </div>
       </div>
+
+      <Card className="rounded-xl border-border bg-card">
+        <CardContent className="grid grid-cols-1 gap-4 p-5 sm:grid-cols-3">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.5px] text-muted-foreground">Saldo atual</p>
+            <p className="mt-1 text-2xl font-bold tabular-nums text-foreground">{ptCurrency.format(totalBankBalance)}</p>
+            <p className="text-xs text-muted-foreground">Soma das contas</p>
+          </div>
+          <div className="sm:border-l sm:border-border sm:pl-4">
+            <p className="text-xs font-semibold uppercase tracking-[0.5px] text-primary">Caixa Projetado</p>
+            <p className={cn("mt-1 text-2xl font-bold tabular-nums", projectedCash >= 0 ? "text-foreground" : "text-destructive")}>
+              {ptCurrency.format(projectedCash)}
+            </p>
+            <p className="text-xs text-muted-foreground">Saldo + pendências do mês</p>
+          </div>
+          <div className="sm:border-l sm:border-border sm:pl-4">
+            <p className="text-xs font-semibold uppercase tracking-[0.5px] text-muted-foreground">Variação prevista</p>
+            <p className={cn("mt-1 text-2xl font-bold tabular-nums", projectedDelta >= 0 ? "text-success" : "text-destructive")}>
+              {projectedDelta >= 0 ? "+" : ""}{ptCurrency.format(projectedDelta)}
+            </p>
+            <p className="text-xs text-muted-foreground">Receitas − despesas pendentes</p>
+          </div>
+        </CardContent>
+      </Card>
 
       <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
         <Card className="rounded-xl border-border bg-card">
