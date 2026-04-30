@@ -5,6 +5,7 @@ import {
   BarChart3,
   Bell,
   CalendarDays,
+  Calculator,
   ChevronLeft,
   ChevronRight,
   CreditCard,
@@ -53,6 +54,7 @@ const MAIN_ITEMS = [
 const EXTRA_ITEMS = [
   { label: "Relatórios", path: "/reports", icon: BarChart3 },
   { label: "Metas & Orçamento", path: "/goals", icon: Target },
+  { label: "Ferramentas", path: "/tools", icon: Calculator },
   { label: "Importar CSV", path: "/import", icon: FileDown },
 ] as const;
 

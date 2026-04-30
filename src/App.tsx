@@ -22,6 +22,7 @@ import SchedulePage from "./pages/Schedule.tsx";
 import ReportsPage from "./pages/Reports.tsx";
 import GoalsPage from "./pages/Goals.tsx";
 import ImportCsvPage from "./pages/ImportCsv.tsx";
+import ToolsPage from "./pages/Tools.tsx";
 import FamilyPage from "./pages/Family.tsx";
 import SettingsPage from "./pages/Settings.tsx";
 import Index from "./pages/Index.tsx";
@@ -94,6 +95,7 @@ const App = () => (
               <Route path="/reports" element={<ReportsPage />} />
               <Route path="/goals" element={<GoalsPage />} />
               <Route path="/import" element={<ImportCsvPage />} />
+              <Route path="/tools" element={<ToolsPage />} />
               <Route path="/family" element={<FamilyPage />} />
               <Route path="/settings" element={<SettingsPage />} />
             </Route>
