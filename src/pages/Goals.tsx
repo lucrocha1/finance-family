@@ -177,7 +177,7 @@ const GoalsPage = () => {
     // so .eq("family_id", family.id) is redundant — and actively hides
     // rows whose family_id drifted from the current FamilyContext.
     const [categoriesRes, budgetsRes, txRes, goalsRes, contribRes] = await Promise.all([
-      supabase.from("categories").select("id, name, color, icon, type").eq("type", "expense").order("name", { ascending: true }),
+      supabase.from("categories").select("id, name, color, icon, type").or("type.eq.expense,type.is.null").order("name", { ascending: true }),
       supabase.from("budgets").select("id, category_id, amount, month, year, user_id, family_id").eq("month", month).eq("year", year),
       supabase.from("transactions").select("category_id, amount, type, date").eq("type", "expense").gte("date", from).lte("date", to),
       supabase.from("goals").select("id, user_id, family_id, name, emoji, color, target_amount, current_amount, target_date, description, status, created_at").order("created_at", { ascending: false }),
