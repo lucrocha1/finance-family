@@ -428,6 +428,13 @@ const totalBankBalance = useMemo(() => accounts.reduce((sum, account) => sum + N
     const grouped = new Map<string, { name: string; value: number; color: string }>();
     transactions
       .filter((tx) => tx.type === "expense")
+      // Compras no cartão são categorizadas, mas o "A Pagar" representa
+      // saídas reais do caixa no mês. Cartão sai do caixa via fatura — então
+      // não somamos a compra individual aqui. Em "Pago" elas também ficam de
+      // fora porque ainda não foram pagas (status="pending"); quando o user
+      // paga a fatura, todas viram "paid" e mesmo assim não somamos (a saída
+      // real de caixa é o "Pagamento Fatura" que NÃO tem card_id).
+      .filter((tx) => !tx.card_id)
       .filter((tx) => (categoriesTab === "paid" ? tx.status === "paid" : tx.status === "pending"))
       .forEach((tx) => {
         const rawCategory = Array.isArray(tx.categories) ? tx.categories[0] : tx.categories;
