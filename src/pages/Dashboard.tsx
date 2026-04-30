@@ -657,8 +657,8 @@ const DashboardPage = () => {
               </div>
             </div>
           </CardHeader>
-          <CardContent className="flex flex-col gap-4 xl:flex-row">
-            <div className="relative mx-auto aspect-square h-[220px] w-full max-w-[220px] xl:mx-0">
+          <CardContent className="flex flex-col items-center gap-4">
+            <div className="relative aspect-square h-[200px] w-full max-w-[200px]">
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   {donutData.rows.length ? (
@@ -680,7 +680,7 @@ const DashboardPage = () => {
               </div>
             </div>
 
-            <div className="flex-1 space-y-2">
+            <div className="w-full min-w-0 space-y-2">
               {donutData.rows.length ? (
                 donutData.rows.map((item) => (
                   <div key={item.name} className="flex items-center justify-between gap-3 rounded-lg border border-border bg-secondary/20 px-3 py-1.5">
@@ -711,8 +711,8 @@ const DashboardPage = () => {
               </div>
             </div>
           </CardHeader>
-          <CardContent className="flex flex-col gap-4 xl:flex-row">
-            <div className="relative mx-auto aspect-square h-[220px] w-full max-w-[220px] xl:mx-0">
+          <CardContent className="flex flex-col items-center gap-4">
+            <div className="relative aspect-square h-[200px] w-full max-w-[200px]">
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   {incomeDonutData.rows.length ? (
@@ -734,7 +734,7 @@ const DashboardPage = () => {
               </div>
             </div>
 
-            <div className="flex-1 space-y-2">
+            <div className="w-full min-w-0 space-y-2">
               {incomeDonutData.rows.length ? (
                 incomeDonutData.rows.map((item) => (
                   <div key={item.name} className="flex items-center justify-between gap-3 rounded-lg border border-border bg-secondary/20 px-3 py-1.5">
