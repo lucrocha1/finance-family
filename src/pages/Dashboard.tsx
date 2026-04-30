@@ -115,6 +115,23 @@ const formatCompactBRL = (value: number) => {
   return ptCurrency.format(value);
 };
 
+// Returns the invoice cycle whose due date falls in the given month/year.
+// Used to project the invoice payment as a single cash-flow event at the
+// due date instead of N tiny entries on each purchase day.
+const getInvoiceCycleForMonth = (closingDay: number, dueDay: number, year: number, month: number) => {
+  const clampDay = (y: number, m: number, d: number) => {
+    const last = new Date(y, m + 1, 0).getDate();
+    return new Date(y, m, Math.min(d, last));
+  };
+  const dueDate = clampDay(year, month, dueDay);
+  const closingOffset = dueDay >= closingDay ? 0 : -1;
+  const closingDate = clampDay(year, month + closingOffset, closingDay);
+  const prevClosing = clampDay(year, month + closingOffset - 1, closingDay);
+  const cycleStart = new Date(prevClosing);
+  cycleStart.setDate(cycleStart.getDate() + 1);
+  return { dueDate, cycleStart, cycleEnd: closingDate };
+};
+
 // Computes the open invoice cycle of a card based on closing/due day.
 const getOpenInvoiceWindow = (closingDay: number, dueDay: number, today = new Date()) => {
   const year = today.getFullYear();
@@ -296,10 +313,30 @@ const DashboardPage = () => {
 
 const totalBankBalance = useMemo(() => accounts.reduce((sum, account) => sum + Number(account.balance || 0), 0), [accounts]);
 
-  // Caixa projetado = saldo na conta hoje + (receitas pendentes - despesas pendentes)
-  // não-cartão no período. Compras de cartão entram via fatura, então não somamos
-  // aqui — o que reduz o caixa é o pagamento da fatura quando vence (o evento já
-  // está no fluxo do período se foi marcado pendente).
+  // Faturas de cartão que vencem no mês visível, tratadas como UMA despesa
+  // pendente única na data de vencimento. Se a fatura já foi paga (via
+  // "Pagar Fatura"), todas as txs do ciclo viraram status=paid → unpaid=0
+  // → não geramos evento sintético (o "Pagamento Fatura" não-cartão já
+  // está em transactions e é contado normalmente).
+  const cardInvoiceProjections = useMemo(() => {
+    const events: Array<{ dueDate: Date; amount: number; cardId: string }> = [];
+    cards.forEach((card) => {
+      const closingDay = Number(card.closing_day || 0);
+      const dueDay = Number(card.due_day || 0);
+      if (!closingDay || !dueDay) return;
+      const cycle = getInvoiceCycleForMonth(closingDay, dueDay, monthStart.getFullYear(), monthStart.getMonth());
+      const cycleStartIso = toISODate(cycle.cycleStart);
+      const cycleEndIso = toISODate(cycle.cycleEnd);
+      const unpaid = cardTransactions
+        .filter((tx) => tx.card_id === card.id && tx.date >= cycleStartIso && tx.date <= cycleEndIso && tx.status !== "paid")
+        .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+      if (unpaid > 0) {
+        events.push({ dueDate: cycle.dueDate, amount: unpaid, cardId: card.id });
+      }
+    });
+    return events;
+  }, [cards, cardTransactions, monthStart]);
+
   const projectedCash = useMemo(() => {
     const pendingIncome = transactions
       .filter((tx) => tx.type === "income" && tx.status !== "paid" && !tx.card_id)
@@ -307,8 +344,9 @@ const totalBankBalance = useMemo(() => accounts.reduce((sum, account) => sum + N
     const pendingExpense = transactions
       .filter((tx) => tx.type === "expense" && tx.status !== "paid" && !tx.card_id)
       .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
-    return totalBankBalance + pendingIncome - pendingExpense;
-  }, [transactions, totalBankBalance]);
+    const cardInvoiceTotal = cardInvoiceProjections.reduce((sum, ev) => sum + ev.amount, 0);
+    return totalBankBalance + pendingIncome - pendingExpense - cardInvoiceTotal;
+  }, [transactions, totalBankBalance, cardInvoiceProjections]);
 
   const projectedDelta = projectedCash - totalBankBalance;
 
@@ -438,10 +476,8 @@ const totalBankBalance = useMemo(() => accounts.reduce((sum, account) => sum + N
     const daysInMonth = monthEnd.getDate();
     const rows = Array.from({ length: daysInMonth }, (_, index) => ({ day: index + 1, change: 0, saldo: 0 }));
 
-    // Card-funded transactions don't affect the cash flow until the
-    // invoice is paid, so we exclude them here just like in totals /
-    // projected cash. The invoice payment itself is a non-card
-    // transaction and shows up normally.
+    // Card-funded transactions don't affect cash flow individually —
+    // the invoice payment does, as a single event on its due date.
     transactions
       .filter((tx) => !tx.card_id)
       .filter((tx) => (flowTab === "realized" ? tx.status === "paid" : tx.status === "paid" || tx.status === "pending" || tx.status === null))
@@ -452,12 +488,23 @@ const totalBankBalance = useMemo(() => accounts.reduce((sum, account) => sum + N
         rows[index].change += tx.type === "income" ? Number(tx.amount || 0) : -Number(tx.amount || 0);
       });
 
+    // Inject projected card-invoice payments on their due date (only on
+    // the projected tab — realized shows real payments only).
+    if (flowTab === "projected") {
+      cardInvoiceProjections.forEach((ev) => {
+        if (ev.dueDate.getMonth() !== monthEnd.getMonth() || ev.dueDate.getFullYear() !== monthEnd.getFullYear()) return;
+        const index = ev.dueDate.getDate() - 1;
+        if (index < 0 || index >= rows.length) return;
+        rows[index].change -= ev.amount;
+      });
+    }
+
     let running = 0;
     return rows.map((row) => {
       running += row.change;
       return { ...row, saldo: running };
     });
-  }, [flowTab, monthEnd, transactions]);
+  }, [cardInvoiceProjections, flowTab, monthEnd, transactions]);
 
   const flowLastValue = flowData[flowData.length - 1]?.saldo ?? 0;
 
