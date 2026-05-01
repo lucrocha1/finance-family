@@ -44,6 +44,8 @@ type TxExpenseRow = {
   amount: number;
   status: string | null;
   date: string;
+  is_recurring: boolean | null;
+  recurrence_parent_id: string | null;
 };
 
 const ptCurrency = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
@@ -180,7 +182,7 @@ const CardsPage = () => {
     // ficam visíveis pra reconciliação.
     const txRes = await supabase
       .from("transactions")
-      .select("card_id, amount, status, date")
+      .select("card_id, amount, status, date, is_recurring, recurrence_parent_id")
       .eq("type", "expense")
       .in(
         "card_id",
@@ -207,6 +209,8 @@ const CardsPage = () => {
         amount: tx.amount,
         status: tx.status,
         date: tx.date,
+        is_recurring: tx.is_recurring,
+        recurrence_parent_id: tx.recurrence_parent_id,
       })),
     );
 

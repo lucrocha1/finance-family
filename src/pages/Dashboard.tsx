@@ -166,7 +166,10 @@ const DashboardPage = () => {
   const [previousTransactions, setPreviousTransactions] = useState<TransactionRow[]>([]);
   const [accounts, setAccounts] = useState<AccountRow[]>([]);
   const [cards, setCards] = useState<CardRow[]>([]);
-  const [cardCommitments, setCardCommitments] = useState<Pick<TransactionRow, "card_id" | "amount" | "type" | "status" | "date">[]>([]);
+  type CardCommitmentRow = Pick<TransactionRow, "card_id" | "amount" | "type" | "status" | "date" | "is_recurring"> & {
+    recurrence_parent_id: string | null;
+  };
+  const [cardCommitments, setCardCommitments] = useState<CardCommitmentRow[]>([]);
   const [cardTransactions, setCardTransactions] = useState<Pick<TransactionRow, "card_id" | "amount" | "date" | "status" | "category_id" | "categories">[]>([]);
   const [cumulativePendingTxs, setCumulativePendingTxs] = useState<Pick<TransactionRow, "id" | "card_id" | "amount" | "type" | "status" | "date">[]>([]);
   const [cumulativeDebts, setCumulativeDebts] = useState<DebtForProjection[]>([]);
@@ -242,12 +245,12 @@ const DashboardPage = () => {
           .gte("due_date", toISODate(weekStart))
           .lte("due_date", toISODate(weekEnd)),
         // Compromissos do cartão = todas as despesas com cartão ainda não pagas.
-        // Inclui date e status pra computeSpentByCard segregar entre ciclo
-        // aberto+futuros (cobra do limite) e ciclos passados (em atraso,
-        // não inflam limite atual).
+        // Inclui date, status, is_recurring e recurrence_parent_id pra
+        // computeSpentByCard distinguir parcelas (somam todas as futuras)
+        // de recorrentes (só a próxima ocorrência conta).
         supabase
           .from("transactions")
-          .select("card_id, amount, type, status, date")
+          .select("card_id, amount, type, status, date, is_recurring, recurrence_parent_id")
           .eq("family_id", family.id)
           .eq("type", "expense")
           .neq("status", "paid")
@@ -296,7 +299,7 @@ const DashboardPage = () => {
       setPreviousTransactions((txPrev.data as TransactionRow[] | null) ?? []);
       setAccounts((accountsRes.data as AccountRow[] | null) ?? []);
       setCards((cardsRes.data as CardRow[] | null) ?? []);
-      setCardCommitments((cardCommitRes.data as Pick<TransactionRow, "card_id" | "amount" | "type" | "status" | "date">[] | null) ?? []);
+      setCardCommitments((cardCommitRes.data as CardCommitmentRow[] | null) ?? []);
       setCardTransactions((cardTxRes.data as Pick<TransactionRow, "card_id" | "amount" | "date" | "status" | "category_id" | "categories">[] | null) ?? []);
       setCumulativePendingTxs((cumulativePendingRes.data as Pick<TransactionRow, "id" | "card_id" | "amount" | "type" | "status" | "date">[] | null) ?? []);
       setCumulativeDebts((cumulativeDebtsRes.data as DebtForProjection[] | null) ?? []);

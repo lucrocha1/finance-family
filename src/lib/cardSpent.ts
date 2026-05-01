@@ -38,6 +38,15 @@ export type CardCommitment = {
   amount: number | null;
   status: string | null;
   date: string;
+  // Pra distinguir recorrências (assinaturas) de parcelamentos:
+  // - Parcelas no cartão (is_installment=true) seguem somando todas as
+  //   futuras, porque o banco realmente reserva o limite.
+  // - Recorrentes (recurrence_parent_id != null OU is_recurring=true)
+  //   só somam a próxima ocorrência no ciclo aberto. Meses futuros não
+  //   bloqueiam o limite — é uma cobrança que vai acontecer mas pode
+  //   ser cancelada, e não é "compromisso firme" como parcela.
+  is_recurring: boolean | null;
+  recurrence_parent_id: string | null;
 };
 
 export type CardSpentResult = {
@@ -92,11 +101,19 @@ export const computeSpentByCard = (
       if (tx.card_id !== card.id) continue;
       if (tx.status === "paid") continue;
       const amount = Number(tx.amount || 0);
+      const isRecurring = Boolean(tx.is_recurring) || tx.recurrence_parent_id != null;
 
       if (cycleStartIso && tx.date < cycleStartIso) {
         overdue += amount;
         overdueCount += 1;
       } else if (cycleEndIso && tx.date > cycleEndIso) {
+        // Ciclo futuro: parcelas e compras avulsas seguem somando (banco
+        // realmente reserva o limite). Recorrentes (assinaturas mensais)
+        // são puladas — só a próxima ocorrência conta, e ela cai no
+        // bloco "currentCycle" abaixo. Cancelamento de assinatura é
+        // simples e barato; bloquear o limite por meses futuros não
+        // reflete compromisso firme.
+        if (isRecurring) continue;
         futureCycles += amount;
         futureCount += 1;
         spent += amount;
