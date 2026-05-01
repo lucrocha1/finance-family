@@ -153,6 +153,8 @@ const TransactionsPage = () => {
 
   const [listView, setListView] = useState<"transactions" | "planned">("transactions");
   const [plannedItems, setPlannedItems] = useState<PlannedItemRow[]>([]);
+  const [plannedKindFilter, setPlannedKindFilter] = useState<"all" | "expense" | "income">("all");
+  const [plannedSort, setPlannedSort] = useState<"created" | "date" | "value" | "priority">("created");
   const [plannedDialogOpen, setPlannedDialogOpen] = useState(false);
   const [plannedKind, setPlannedKind] = useState<"expense" | "income">("expense");
   const [plannedEditing, setPlannedEditing] = useState<PlannedItemRow | null>(null);
@@ -278,6 +280,46 @@ const TransactionsPage = () => {
     const expense = filtered.filter((tx) => tx.type === "expense").reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
     return { income, expense, balance: income - expense };
   }, [filtered]);
+
+  const plannedStats = useMemo(() => {
+    const expenses = plannedItems.filter((p) => p.kind === "expense");
+    const incomes = plannedItems.filter((p) => p.kind === "income");
+    const totalExpense = expenses.reduce((s, p) => s + Number(p.amount || 0), 0);
+    const totalIncome = incomes.reduce((s, p) => s + Number(p.amount || 0), 0);
+    const byPriority = { high: 0, medium: 0, low: 0 } as Record<"high" | "medium" | "low", number>;
+    plannedItems.forEach((p) => { byPriority[p.priority] += 1; });
+    const withDate = plannedItems
+      .filter((p) => p.target_date)
+      .sort((a, b) => (a.target_date! < b.target_date! ? -1 : 1));
+    const nextItem = withDate[0] ?? null;
+    return {
+      totalExpense,
+      totalIncome,
+      balance: totalIncome - totalExpense,
+      countExpense: expenses.length,
+      countIncome: incomes.length,
+      byPriority,
+      nextItem,
+      withoutDate: plannedItems.filter((p) => !p.target_date).length,
+    };
+  }, [plannedItems]);
+
+  const plannedRows = useMemo(() => {
+    const filteredP = plannedKindFilter === "all" ? plannedItems : plannedItems.filter((p) => p.kind === plannedKindFilter);
+    const priorityWeight = { high: 0, medium: 1, low: 2 } as const;
+    const sorted = [...filteredP].sort((a, b) => {
+      if (plannedSort === "date") {
+        if (!a.target_date && !b.target_date) return 0;
+        if (!a.target_date) return 1;
+        if (!b.target_date) return -1;
+        return a.target_date < b.target_date ? -1 : 1;
+      }
+      if (plannedSort === "value") return Number(b.amount || 0) - Number(a.amount || 0);
+      if (plannedSort === "priority") return priorityWeight[a.priority] - priorityWeight[b.priority];
+      return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+    });
+    return sorted;
+  }, [plannedItems, plannedKindFilter, plannedSort]);
 
   const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const currentPage = Math.min(page, pageCount);
@@ -700,6 +742,101 @@ const TransactionsPage = () => {
             Despesas e receitas que você quer fazer no futuro mas <span className="font-semibold text-foreground">ainda sem data</span>. Não entram em Dashboard, Caixa Projetado, Agenda ou sino. Quando definir uma data, clique em Agendar para virar pendente.
           </div>
 
+          {plannedItems.length > 0 && (
+            <>
+              <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+                <Card className="rounded-xl border-border bg-card">
+                  <CardContent className="p-4">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Despesas planejadas</p>
+                    <p className="mt-1 text-xl font-bold tabular-nums text-destructive">{ptCurrency.format(plannedStats.totalExpense)}</p>
+                    <p className="text-xs text-muted-foreground">{plannedStats.countExpense} {plannedStats.countExpense === 1 ? "item" : "itens"}</p>
+                  </CardContent>
+                </Card>
+                <Card className="rounded-xl border-border bg-card">
+                  <CardContent className="p-4">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Receitas planejadas</p>
+                    <p className="mt-1 text-xl font-bold tabular-nums text-success">{ptCurrency.format(plannedStats.totalIncome)}</p>
+                    <p className="text-xs text-muted-foreground">{plannedStats.countIncome} {plannedStats.countIncome === 1 ? "item" : "itens"}</p>
+                  </CardContent>
+                </Card>
+                <Card className="rounded-xl border-border bg-card">
+                  <CardContent className="p-4">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Saldo planejado</p>
+                    <p className={cn("mt-1 text-xl font-bold tabular-nums", plannedStats.balance >= 0 ? "text-foreground" : "text-destructive")}>
+                      {plannedStats.balance >= 0 ? "+" : ""}{ptCurrency.format(plannedStats.balance)}
+                    </p>
+                    <p className="text-xs text-muted-foreground">Receitas − despesas</p>
+                  </CardContent>
+                </Card>
+                <Card className="rounded-xl border-border bg-card">
+                  <CardContent className="p-4">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Próximo alvo</p>
+                    {plannedStats.nextItem ? (
+                      <>
+                        <p className="mt-1 truncate text-sm font-bold text-foreground">{plannedStats.nextItem.description}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {new Date(`${plannedStats.nextItem.target_date}T00:00:00`).toLocaleDateString("pt-BR")} · {ptCurrency.format(Number(plannedStats.nextItem.amount || 0))}
+                        </p>
+                      </>
+                    ) : (
+                      <>
+                        <p className="mt-1 text-sm font-bold text-foreground">Sem data definida</p>
+                        <p className="text-xs text-muted-foreground">{plannedStats.withoutDate} sem alvo</p>
+                      </>
+                    )}
+                  </CardContent>
+                </Card>
+              </div>
+
+              <Card className="rounded-xl border-border bg-card">
+                <CardContent className="p-4">
+                  <div className="mb-2 flex items-center justify-between">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Por prioridade</p>
+                    <p className="text-xs text-muted-foreground">{plannedItems.length} no total</p>
+                  </div>
+                  <div className="flex h-2 overflow-hidden rounded-full bg-secondary">
+                    {(["high", "medium", "low"] as const).map((p) => {
+                      const count = plannedStats.byPriority[p];
+                      if (count === 0) return null;
+                      const width = (count / plannedItems.length) * 100;
+                      const color = p === "high" ? "bg-destructive" : p === "medium" ? "bg-warning" : "bg-info";
+                      return <div key={p} className={cn("h-full", color)} style={{ width: `${width}%` }} />;
+                    })}
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-3 text-xs">
+                    <span className="inline-flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-destructive" />Alta {plannedStats.byPriority.high}</span>
+                    <span className="inline-flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-warning" />Média {plannedStats.byPriority.medium}</span>
+                    <span className="inline-flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-info" />Baixa {plannedStats.byPriority.low}</span>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="flex rounded-lg bg-secondary p-1">
+                  {(["all", "expense", "income"] as const).map((k) => (
+                    <button
+                      key={k}
+                      type="button"
+                      onClick={() => setPlannedKindFilter(k)}
+                      className={cn("rounded-md px-3 py-1 text-xs font-semibold", plannedKindFilter === k ? "bg-primary text-primary-foreground" : "text-muted-foreground")}
+                    >
+                      {k === "all" ? "Todos" : k === "expense" ? "Despesas" : "Receitas"}
+                    </button>
+                  ))}
+                </div>
+                <Select value={plannedSort} onValueChange={(v) => setPlannedSort(v as typeof plannedSort)}>
+                  <SelectTrigger className="h-8 w-auto rounded-lg border-border bg-secondary text-xs"><SelectValue /></SelectTrigger>
+                  <SelectContent className="border-border bg-card">
+                    <SelectItem value="created">Mais recentes</SelectItem>
+                    <SelectItem value="date">Por data alvo</SelectItem>
+                    <SelectItem value="value">Por valor</SelectItem>
+                    <SelectItem value="priority">Por prioridade</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </>
+          )}
+
           {plannedItems.length === 0 ? (
             <div className="rounded-xl border border-dashed border-border bg-secondary/20 p-10 text-center">
               <p className="text-base font-semibold text-foreground">Nenhuma transação planejada</p>
@@ -720,7 +857,7 @@ const TransactionsPage = () => {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {plannedItems.map((item) => (
+                    {plannedRows.map((item) => (
                       <TableRow key={item.id} className="border-b border-border">
                         <TableCell className="px-4 py-3 text-sm font-medium text-foreground">{item.description}</TableCell>
                         <TableCell className="px-4 py-3 text-sm">
