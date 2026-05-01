@@ -110,15 +110,21 @@ export const computeSpentByCard = (
       if (tx.status === "paid") continue;
       const amount = Number(tx.amount || 0);
       const isRecurring = Boolean(tx.is_recurring) || tx.recurrence_parent_id != null;
+      const isInstallment = Boolean(tx.is_installment);
 
       if (cycleStartIso && tx.date < cycleStartIso) {
         overdue += amount;
         overdueCount += 1;
       } else if (cycleEndIso && tx.date > cycleEndIso) {
-        // Ciclo futuro: parcelas e compras avulsas seguem somando (banco
-        // reserva o limite até a fatura ser paga). Recorrentes em meses
-        // futuros NÃO contam (assinatura pode ser cancelada).
+        // Ciclo futuro:
+        // - Parcelas: contam (compra parcelada já contratada — banco
+        //   reserva o limite por todas as parcelas).
+        // - Recorrentes: NÃO contam (assinatura mensal pode ser cancelada).
+        // - Compras avulsas em ciclos futuros: NÃO contam pra LIMITE
+        //   deste ciclo. Só vão contar quando a gente olhar a fatura
+        //   delas (cycleStart muda, e elas viram currentCycle).
         if (isRecurring) continue;
+        if (!isInstallment) continue;
         futureCycles += amount;
         futureCount += 1;
         spent += amount;
