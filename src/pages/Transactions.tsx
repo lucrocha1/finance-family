@@ -579,7 +579,14 @@ const TransactionsPage = () => {
     } else if (linkedMemberId && linkedMemberId !== "none" && parsed.data.type !== "transfer" && !parsed.data.isInstallment) {
       // Transação vinculada com outro membro: cria o par via RPC.
       // O espelho aparece pra outra pessoa com tipo invertido + status pending.
-      const { error } = await supabase.rpc("create_linked_transaction", {
+      // Se for recorrente, ambos os parents nascem com is_recurring=true e
+      // depois chamamos generate_linked_pair_recurrences pra criar pares
+      // mensais até 90 dias.
+      const recurringEnabled = parsed.data.isRecurring;
+      const recurrenceDay = recurringEnabled && parsed.data.recurrenceType === "monthly"
+        ? Number(parsed.data.date.slice(8, 10))
+        : null;
+      const { data: parentId, error } = await supabase.rpc("create_linked_transaction", {
         p_amount: parsed.data.amountCents / 100,
         p_date: parsed.data.date,
         p_description: parsed.data.description.trim(),
@@ -589,8 +596,16 @@ const TransactionsPage = () => {
         p_category_id: parsed.data.type === "transfer" ? null : parsed.data.categoryId,
         p_account_id: parsed.data.type === "transfer" ? parsed.data.fromAccountId : parsed.data.type === "expense" && parsed.data.cardId ? null : parsed.data.accountId,
         p_notes: parsed.data.notes?.trim() || null,
+        p_is_recurring: recurringEnabled,
+        p_recurrence_type: recurringEnabled ? parsed.data.recurrenceType : null,
+        p_recurrence_day: recurrenceDay,
+        p_recurrence_end_date: null,
       });
       if (error) errorMessage = error.message;
+      if (!error && recurringEnabled && parentId) {
+        const { error: genErr } = await supabase.rpc("generate_linked_pair_recurrences", { p_my_parent_id: parentId });
+        if (genErr) console.warn("[linked-recurrence] generate failed:", genErr.message);
+      }
     } else {
       const { error } = await supabase.from("transactions").insert({ ...base, type: parsed.data.type, user_id: ctx.userId, family_id: ctx.familyId });
       if (error) errorMessage = error.message;

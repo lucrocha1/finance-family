@@ -19,6 +19,8 @@ type Parent = {
   recurrence_type: RecurrenceType;
   recurrence_end_date: string | null;
   recurrence_day: number | null;
+  linked_user_id: string | null;
+  linked_pair_id: string | null;
 };
 
 const toIso = (d: Date) => {
@@ -55,7 +57,7 @@ export const generateRecurrencesForFamily = async (familyId: string, authUserId:
   const { data: parents, error: parentsErr } = await supabase
     .from("transactions")
     .select(
-      "id, family_id, user_id, type, description, amount, date, notes, category_id, account_id, card_id, recurrence_type, recurrence_end_date, recurrence_day",
+      "id, family_id, user_id, type, description, amount, date, notes, category_id, account_id, card_id, recurrence_type, recurrence_end_date, recurrence_day, linked_user_id, linked_pair_id",
     )
     .eq("family_id", familyId)
     .eq("is_recurring", true)
@@ -68,6 +70,16 @@ export const generateRecurrencesForFamily = async (familyId: string, authUserId:
 
   for (const parent of parents as Parent[]) {
     if (!parent.recurrence_type) continue;
+
+    // Linked parents: handled by security-definer RPC porque o lado espelho
+    // pertence a outro user_id e RLS bloqueia insert direto.
+    if (parent.linked_user_id && parent.user_id === authUserId) {
+      const { error: rpcErr } = await supabase.rpc("generate_linked_pair_recurrences", { p_my_parent_id: parent.id });
+      if (!rpcErr) created += 1; // count rough — RPC retorna nº de pares
+      continue;
+    }
+    // Pula parent espelho de outra ponta — só o "dono" gera via RPC
+    if (parent.linked_user_id && parent.user_id !== authUserId) continue;
 
     const { data: latestRows } = await supabase
       .from("transactions")
