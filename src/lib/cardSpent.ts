@@ -26,37 +26,10 @@ const toIso = (d: Date) => {
   return local.toISOString().slice(0, 10);
 };
 
-// isCommittedCardTx — fonte da verdade pra decidir se uma tx no cartão
-// "conta" como fatura/limite agora ou se ainda é uma compra agendada
-// (planejada pra data futura, não bloqueia limite nem aparece na
-// fatura até o dia chegar).
-//
-// Conta se:
-//   1. date <= today (compra já feita), OU
-//   2. is_installment=true (parcela de compra já contratada), OU
-//   3. is_recurring=true (parent recorrente — assinatura ativa), OU
-//   4. recurrence_parent_id != null (criança recorrente)
-// Caso contrário (date > today AND single AND não-recorrente): SKIP.
-//
-// Usado em computeSpentByCard E nos listings/aggregates de fatura
-// (CardInvoiceDetail, Dashboard openInvoices) pra manter consistência:
-// se a tx aparece na fatura, ela aparece no limite, e vice-versa.
-export const isCommittedCardTx = (
-  tx: {
-    date: string;
-    is_installment: boolean | null;
-    is_recurring: boolean | null;
-    recurrence_parent_id: string | null;
-  },
-  today: Date = new Date(),
-): boolean => {
-  const todayIso = toIso(today);
-  if (tx.date <= todayIso) return true;
-  if (tx.is_installment) return true;
-  if (tx.is_recurring) return true;
-  if (tx.recurrence_parent_id != null) return true;
-  return false;
-};
+// (helper isCommittedCardTx removido — toda compra pending no cartão
+// conta no limite e aparece na fatura, independente de date > today.
+// Recorrentes futuras seguem sendo puladas dentro de computeSpentByCard
+// porque assinatura mensal não é compromisso firme do banco.)
 
 export type CardSpentInput = {
   id: string;
@@ -138,17 +111,13 @@ export const computeSpentByCard = (
       const amount = Number(tx.amount || 0);
       const isRecurring = Boolean(tx.is_recurring) || tx.recurrence_parent_id != null;
 
-      // Filtro central: compra agendada pra data futura não conta
-      // (helper compartilhado com fatura listing/histórico).
-      if (!isCommittedCardTx(tx, todayLocal)) continue;
-
       if (cycleStartIso && tx.date < cycleStartIso) {
         overdue += amount;
         overdueCount += 1;
       } else if (cycleEndIso && tx.date > cycleEndIso) {
-        // Ciclo futuro: parcelas seguem somando (banco realmente reserva
-        // o limite). Recorrentes em meses futuros NÃO contam (assinatura
-        // pode ser cancelada).
+        // Ciclo futuro: parcelas e compras avulsas seguem somando (banco
+        // reserva o limite até a fatura ser paga). Recorrentes em meses
+        // futuros NÃO contam (assinatura pode ser cancelada).
         if (isRecurring) continue;
         futureCycles += amount;
         futureCount += 1;
