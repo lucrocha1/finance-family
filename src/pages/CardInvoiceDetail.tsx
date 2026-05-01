@@ -211,7 +211,14 @@ const CardInvoiceDetailPage = () => {
 
     setTransactions((txRes.data as TransactionRow[] | null) ?? []);
 
-    const months = Array.from({ length: 6 }, (_, index) => startOfMonth(new Date(new Date().getFullYear(), new Date().getMonth() - index, 1)));
+    // Histórico: 6 meses passados + mês atual + 6 meses futuros, pra
+    // que parcelas e recorrentes em ciclos futuros fiquem visíveis (esse
+    // é o caminho pra investigar quando o limite mostra mais do que a
+    // fatura aberta + parcelas conhecidas).
+    const baseMonth = startOfMonth(new Date());
+    const months = Array.from({ length: 13 }, (_, index) =>
+      startOfMonth(new Date(baseMonth.getFullYear(), baseMonth.getMonth() + 6 - index, 1)),
+    );
     const windows = months.map((month) => ({ month, ...getCycleWindow(Number(currentCard.closing_day || 1), month) }));
     const minStart = windows.map((item) => item.start).sort()[0];
     const maxEnd = windows.map((item) => item.end).sort().slice(-1)[0];
