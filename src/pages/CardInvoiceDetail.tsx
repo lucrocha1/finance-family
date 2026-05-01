@@ -260,6 +260,11 @@ const CardInvoiceDetailPage = () => {
       .eq("type", "expense")
       .neq("status", "paid");
     if (!spentTxsRes.error) {
+      // Passamos o cycleStart da fatura selecionada como "today virtual"
+      // pra que o LIMITE reflita a perspectiva DAQUELA fatura: o ciclo
+      // aberto vira o da fatura visualizada, e as faturas anteriores
+      // (que já fecharam) saem do spent.
+      const virtualToday = new Date(`${cycle.start}T00:00:00`);
       const map = computeSpentByCard(
         [{
           id: currentCard.id,
@@ -268,6 +273,7 @@ const CardInvoiceDetailPage = () => {
           due_day: currentCard.due_day,
         }],
         ((spentTxsRes.data as Array<{ card_id: string | null; amount: number; status: string | null; date: string; is_recurring: boolean | null; recurrence_parent_id: string | null }> | null) ?? []),
+        virtualToday,
       );
       setCardSpent(map.get(currentCard.id) ?? null);
     }
