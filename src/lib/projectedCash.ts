@@ -43,6 +43,20 @@ export type CardTxForCycle = {
   status: string | null;
 };
 
+// Dívidas/empréstimos ativos com vencimento dentro da janela de projeção.
+// Esperamos pré-filtragem leve no chamador (status != 'paid_off',
+// due_date IS NOT NULL), mas a função revalida pra ser robusta.
+export type DebtForProjection = {
+  status: string | null;
+  direction: string | null; // 'i_owe' (cash out) | 'they_owe' (cash in)
+  due_date: string | null;
+  total_with_interest: number | null;
+  original_amount: number | null;
+  amount_paid: number | null;
+  has_installments: boolean | null;
+  installment_amount: number | null;
+};
+
 export type ProjectedCashInput = {
   totalBankBalance: number;
   cumulativePendingTxs: PendingTx[]; // já filtrados: status != paid, card_id IS NULL, date entre hoje e monthEnd
@@ -50,6 +64,7 @@ export type ProjectedCashInput = {
   cardTransactions: CardTxForCycle[]; // gastos de cartão num range que cobre [hoje-60d, monthEnd+30d]
   monthEnd: Date;
   today?: Date;
+  debts?: DebtForProjection[]; // ativos com due_date entre hoje e monthEnd
 };
 
 export type ProjectedCashResult = {
@@ -58,6 +73,8 @@ export type ProjectedCashResult = {
   cardInvoiceTotal: number;
   pendingIncome: number;
   pendingExpense: number;
+  debtOutflow: number; // total a pagar (i_owe) na janela
+  debtInflow: number; // total a receber (they_owe) na janela
 };
 
 export const computeProjectedCash = (input: ProjectedCashInput): ProjectedCashResult => {
@@ -71,8 +88,13 @@ export const computeProjectedCash = (input: ProjectedCashInput): ProjectedCashRe
       cardInvoiceTotal: 0,
       pendingIncome: 0,
       pendingExpense: 0,
+      debtOutflow: 0,
+      debtInflow: 0,
     };
   }
+
+  const todayIso = toIso(today);
+  const monthEndIso = toIso(input.monthEnd);
 
   const pendingIncome = input.cumulativePendingTxs
     .filter((tx) => tx.type === "income")
@@ -109,12 +131,40 @@ export const computeProjectedCash = (input: ProjectedCashInput): ProjectedCashRe
     }
   }
 
-  const projected = input.totalBankBalance + pendingIncome - pendingExpense - cardInvoiceTotal;
+  // Dívidas/empréstimos ativos com vencimento na janela.
+  // Para dívidas parceladas, o schema só guarda um único due_date (próxima
+  // parcela), então projetamos apenas installment_amount nessa janela. Para
+  // dívidas à vista, projetamos o restante (total - pago).
+  let debtOutflow = 0;
+  let debtInflow = 0;
+  for (const debt of input.debts ?? []) {
+    if (!debt.due_date) continue;
+    if (debt.status && debt.status !== "active") continue;
+    if (debt.due_date < todayIso || debt.due_date > monthEndIso) continue;
+    const total = Number(debt.total_with_interest ?? debt.original_amount ?? 0);
+    const remaining = Math.max(0, total - Number(debt.amount_paid ?? 0));
+    if (remaining <= 0) continue;
+    const installment = Number(debt.installment_amount ?? 0);
+    const amount = debt.has_installments && installment > 0
+      ? Math.min(installment, remaining)
+      : remaining;
+    if (amount <= 0) continue;
+    if (debt.direction === "they_owe") {
+      debtInflow += amount;
+    } else {
+      debtOutflow += amount;
+    }
+  }
+
+  const projected =
+    input.totalBankBalance + pendingIncome - pendingExpense - cardInvoiceTotal + debtInflow - debtOutflow;
   return {
     projected,
     delta: projected - input.totalBankBalance,
     cardInvoiceTotal,
     pendingIncome,
     pendingExpense,
+    debtOutflow,
+    debtInflow,
   };
 };

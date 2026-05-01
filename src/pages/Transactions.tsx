@@ -38,7 +38,7 @@ import { buildCSV, downloadCSV } from "@/lib/csvExport";
 import { ensureFamily } from "@/lib/familyGuard";
 import { generateRecurrencesForFamily } from "@/lib/generateRecurrences";
 import { useEnsureRecurrencesUpTo, invalidateRecurrenceHorizon } from "@/hooks/useEnsureRecurrencesUpTo";
-import { computeProjectedCash } from "@/lib/projectedCash";
+import { computeProjectedCash, type DebtForProjection } from "@/lib/projectedCash";
 import { priorityLabel, type PlannedItemRow } from "@/lib/plannedItems";
 import { PlannedItemDialog } from "@/components/PlannedItemDialog";
 import { SchedulePlannedDialog } from "@/components/SchedulePlannedDialog";
@@ -141,6 +141,7 @@ const TransactionsPage = () => {
   const [cardsForCycle, setCardsForCycle] = useState<Array<{ id: string; closing_day: number | null; due_day: number | null }>>([]);
   const [cardTxsForCycle, setCardTxsForCycle] = useState<Array<{ card_id: string | null; amount: number; date: string; status: string | null }>>([]);
   const [cumulativePendingTxs, setCumulativePendingTxs] = useState<Array<{ type: string; amount: number; date: string; status: string | null }>>([]);
+  const [cumulativeDebts, setCumulativeDebts] = useState<DebtForProjection[]>([]);
 
   const [typeFilter, setTypeFilter] = useState<"all" | "income" | "expense" | "transfer">("all");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
@@ -226,7 +227,7 @@ const TransactionsPage = () => {
 
     const [
       txRes, categoriesRes, accountsRes, cardsRes, plannedRes,
-      balancesRes, cardsCycleRes, cardTxsRes, cumulativePendingRes,
+      balancesRes, cardsCycleRes, cardTxsRes, cumulativePendingRes, cumulativeDebtsRes,
     ] = await Promise.all([
       supabase
         .from("transactions")
@@ -256,6 +257,14 @@ const TransactionsPage = () => {
         .is("card_id", null)
         .gte("date", todayIso)
         .lte("date", cumulativeEndIso),
+      supabase
+        .from("debts")
+        .select("status, direction, due_date, total_with_interest, original_amount, amount_paid, has_installments, installment_amount")
+        .eq("family_id", family.id)
+        .eq("status", "active")
+        .not("due_date", "is", null)
+        .gte("due_date", todayIso)
+        .lte("due_date", cumulativeEndIso),
     ]);
     setPlannedItems((plannedRes.data as PlannedItemRow[] | null) ?? []);
 
@@ -282,6 +291,7 @@ const TransactionsPage = () => {
     setCardsForCycle((cardsCycleRes.data as Array<{ id: string; closing_day: number | null; due_day: number | null }> | null) ?? []);
     setCardTxsForCycle((cardTxsRes.data as Array<{ card_id: string | null; amount: number; date: string; status: string | null }> | null) ?? []);
     setCumulativePendingTxs((cumulativePendingRes.data as Array<{ type: string; amount: number; date: string; status: string | null }> | null) ?? []);
+    setCumulativeDebts((cumulativeDebtsRes.data as DebtForProjection[] | null) ?? []);
     setLoading(false);
   }, [family?.id, monthEnd, monthStart]);
 
@@ -349,8 +359,9 @@ const TransactionsPage = () => {
         cards: cardsForCycle,
         cardTransactions: cardTxsForCycle,
         monthEnd,
+        debts: cumulativeDebts,
       }),
-    [totalBankBalance, cumulativePendingTxs, cardsForCycle, cardTxsForCycle, monthEnd],
+    [totalBankBalance, cumulativePendingTxs, cumulativeDebts, cardsForCycle, cardTxsForCycle, monthEnd],
   );
 
   const plannedStats = useMemo(() => {

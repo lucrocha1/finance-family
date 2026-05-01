@@ -37,7 +37,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { getInvoiceCycleForMonth, getOpenInvoiceWindow } from "@/lib/cardCycle";
 import { computeSpentByCard } from "@/lib/cardSpent";
 import { useChartColors } from "@/lib/chartColors";
-import { computeProjectedCash } from "@/lib/projectedCash";
+import { computeProjectedCash, type DebtForProjection } from "@/lib/projectedCash";
 import { cn } from "@/lib/utils";
 
 type TransactionRow = {
@@ -169,6 +169,7 @@ const DashboardPage = () => {
   const [cardCommitments, setCardCommitments] = useState<Pick<TransactionRow, "card_id" | "amount" | "type" | "status" | "date">[]>([]);
   const [cardTransactions, setCardTransactions] = useState<Pick<TransactionRow, "card_id" | "amount" | "date" | "status" | "category_id" | "categories">[]>([]);
   const [cumulativePendingTxs, setCumulativePendingTxs] = useState<Pick<TransactionRow, "id" | "card_id" | "amount" | "type" | "status" | "date">[]>([]);
+  const [cumulativeDebts, setCumulativeDebts] = useState<DebtForProjection[]>([]);
   const [scheduledMonth, setScheduledMonth] = useState<ScheduledPaymentRow[]>([]);
   const [scheduledWeek, setScheduledWeek] = useState<ScheduledPaymentRow[]>([]);
 
@@ -199,6 +200,7 @@ const DashboardPage = () => {
       setCardCommitments([]);
       setCardTransactions([]);
       setCumulativePendingTxs([]);
+      setCumulativeDebts([]);
       setScheduledMonth([]);
       setScheduledWeek([]);
       return;
@@ -212,7 +214,7 @@ const DashboardPage = () => {
       // Janela cumulativa: de hoje até o fim do mês visualizado.
       // Se o mês visualizado é passado, o range fica vazio (start > end) → sem projeção.
       const cumulativeEndIso = toISODate(monthEnd);
-      const [txCurrent, txPrev, accountsRes, cardsRes, schedMonthRes, schedWeekRes, cardCommitRes, cardTxRes, cumulativePendingRes] = await Promise.all([
+      const [txCurrent, txPrev, accountsRes, cardsRes, schedMonthRes, schedWeekRes, cardCommitRes, cardTxRes, cumulativePendingRes, cumulativeDebtsRes] = await Promise.all([
         supabase
           .from("transactions")
           .select("id, family_id, user_id, card_id, category_id, amount, type, status, date, is_installment, is_recurring, categories ( id, name, icon, color )")
@@ -278,6 +280,16 @@ const DashboardPage = () => {
           .is("card_id", null)
           .gte("date", todayIso)
           .lte("date", cumulativeEndIso),
+        // Dívidas/empréstimos ativos com vencimento na janela de projeção.
+        // Entram no Caixa Projetado: i_owe sai do caixa, they_owe entra.
+        supabase
+          .from("debts")
+          .select("status, direction, due_date, total_with_interest, original_amount, amount_paid, has_installments, installment_amount")
+          .eq("family_id", family.id)
+          .eq("status", "active")
+          .not("due_date", "is", null)
+          .gte("due_date", todayIso)
+          .lte("due_date", cumulativeEndIso),
       ]);
 
       setTransactions((txCurrent.data as TransactionRow[] | null) ?? []);
@@ -287,6 +299,7 @@ const DashboardPage = () => {
       setCardCommitments((cardCommitRes.data as Pick<TransactionRow, "card_id" | "amount" | "type" | "status" | "date">[] | null) ?? []);
       setCardTransactions((cardTxRes.data as Pick<TransactionRow, "card_id" | "amount" | "date" | "status" | "category_id" | "categories">[] | null) ?? []);
       setCumulativePendingTxs((cumulativePendingRes.data as Pick<TransactionRow, "id" | "card_id" | "amount" | "type" | "status" | "date">[] | null) ?? []);
+      setCumulativeDebts((cumulativeDebtsRes.data as DebtForProjection[] | null) ?? []);
       setScheduledMonth((schedMonthRes.data as ScheduledPaymentRow[] | null) ?? []);
       setScheduledWeek((schedWeekRes.data as ScheduledPaymentRow[] | null) ?? []);
       setLoading(false);
@@ -376,8 +389,9 @@ const DashboardPage = () => {
         cards,
         cardTransactions,
         monthEnd,
+        debts: cumulativeDebts,
       }),
-    [cumulativePendingTxs, cards, cardTransactions, monthEnd, totalBankBalance],
+    [cumulativePendingTxs, cumulativeDebts, cards, cardTransactions, monthEnd, totalBankBalance],
   );
   const projectedCash = projectedResult.projected;
   const projectedDelta = projectedResult.delta;
