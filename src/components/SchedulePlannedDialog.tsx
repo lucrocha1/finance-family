@@ -98,16 +98,23 @@ export const SchedulePlannedDialog = ({ open, item, onClose, onScheduled }: Prop
     const baseCents = Math.floor(totalCents / installments);
     const remainder = totalCents % installments;
     const groupId = crypto.randomUUID();
+    // Calcula data de cada parcela trabalhando com a string ISO direto
+    // (evita bugs de timezone que Date.setMonth pode gerar em GMT-3).
+    const [baseYear, baseMonth, baseDay] = date.split("-").map(Number);
     const rows = Array.from({ length: installments }, (_, index) => {
-      const due = new Date(`${date}T00:00:00`);
-      due.setMonth(due.getMonth() + index);
+      const targetMonthIndex = baseMonth - 1 + index;
+      const year = baseYear + Math.floor(targetMonthIndex / 12);
+      const month = ((targetMonthIndex % 12) + 12) % 12;
+      const lastDay = new Date(year, month + 1, 0).getDate();
+      const day = Math.min(baseDay, lastDay);
+      const dateStr = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
       return {
         family_id: ctx.familyId,
         user_id: ctx.userId,
         type: "expense",
         description: `${item.description} (${index + 1}/${installments})`,
         amount: (baseCents + (index < remainder ? 1 : 0)) / 100,
-        date: toIsoDate(due),
+        date: dateStr,
         status: "pending",
         category_id: item.category_id,
         account_id: accountId || item.account_id || null,

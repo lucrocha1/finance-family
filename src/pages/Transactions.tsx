@@ -635,19 +635,26 @@ const TransactionsPage = () => {
       const groupId = crypto.randomUUID();
       const baseCents = Math.floor(parsed.data.amountCents / count);
       const remainder = parsed.data.amountCents % count;
-      // Compras parceladas no cartão: TODAS as parcelas nascem pending
-      // (a fatura precisa ser paga pra liberar o limite). Sem cartão (parcela
-      // direto da conta), só a primeira herda o status do form.
       const isCardPurchase = Boolean(parsed.data.cardId);
+      // Calcula data de cada parcela trabalhando com a string ISO direto
+      // (evita bugs de timezone que JS Date.setMonth pode gerar em GMT-3).
+      // Anchor day = dia da primeira parcela. Cada parcela seguinte cai
+      // no mesmo dia de meses subsequentes, com clamp pro último dia do
+      // mês quando o anchor não existir (ex: 31 em fevereiro vira 28/29).
+      const [baseYear, baseMonth, baseDay] = parsed.data.date.split("-").map(Number);
       const rows = Array.from({ length: count }, (_, index) => {
-        const due = new Date(date);
-        due.setMonth(due.getMonth() + index);
+        const targetMonthIndex = baseMonth - 1 + index; // 0-indexed
+        const year = baseYear + Math.floor(targetMonthIndex / 12);
+        const month = ((targetMonthIndex % 12) + 12) % 12; // 0..11
+        const lastDay = new Date(year, month + 1, 0).getDate();
+        const day = Math.min(baseDay, lastDay);
+        const dateStr = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
         return {
           ...base,
           status: isCardPurchase ? "pending" : index === 0 ? base.status : "pending",
           description: `${parsed.data.description.trim()} (${index + 1}/${count})`,
           amount: (baseCents + (index < remainder ? 1 : 0)) / 100,
-          date: toISODate(due),
+          date: dateStr,
           installment_group_id: groupId,
           installment_current: index + 1,
           installment_total: count,
