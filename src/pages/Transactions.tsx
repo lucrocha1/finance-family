@@ -485,6 +485,18 @@ const TransactionsPage = () => {
           })
           .eq("id", editing.id);
         if (error) errorMessage = error.message;
+        // Espelha amount/date/description/notes pra outra ponta do par,
+        // sem mexer em status/conta/categoria (cada lado mantém o seu).
+        if (!error && editing.linked_pair_id) {
+          const { error: pairErr } = await supabase.rpc("update_linked_pair", {
+            p_pair_id: editing.linked_pair_id,
+            p_amount: base.amount,
+            p_date: base.date,
+            p_description: base.description,
+            p_notes: base.notes,
+          });
+          if (pairErr) errorMessage = pairErr.message;
+        }
       }
     } else if (parsed.data.type === "transfer") {
       const payload = [
