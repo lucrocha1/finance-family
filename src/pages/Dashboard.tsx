@@ -199,6 +199,7 @@ const DashboardPage = () => {
   const [cards, setCards] = useState<CardRow[]>([]);
   const [cardCommitments, setCardCommitments] = useState<Pick<TransactionRow, "card_id" | "amount" | "type">[]>([]);
   const [cardTransactions, setCardTransactions] = useState<Pick<TransactionRow, "card_id" | "amount" | "date" | "status" | "category_id" | "categories">[]>([]);
+  const [cumulativePendingTxs, setCumulativePendingTxs] = useState<Pick<TransactionRow, "id" | "card_id" | "amount" | "type" | "status" | "date">[]>([]);
   const [scheduledMonth, setScheduledMonth] = useState<ScheduledPaymentRow[]>([]);
   const [scheduledWeek, setScheduledWeek] = useState<ScheduledPaymentRow[]>([]);
 
@@ -222,6 +223,7 @@ const DashboardPage = () => {
       setCards([]);
       setCardCommitments([]);
       setCardTransactions([]);
+      setCumulativePendingTxs([]);
       setScheduledMonth([]);
       setScheduledWeek([]);
       return;
@@ -229,7 +231,13 @@ const DashboardPage = () => {
 
     const loadDashboard = async () => {
       setLoading(true);
-      const [txCurrent, txPrev, accountsRes, cardsRes, schedMonthRes, schedWeekRes, cardCommitRes, cardTxRes] = await Promise.all([
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const todayIso = toISODate(today);
+      // Janela cumulativa: de hoje até o fim do mês visualizado.
+      // Se o mês visualizado é passado, o range fica vazio (start > end) → sem projeção.
+      const cumulativeEndIso = toISODate(monthEnd);
+      const [txCurrent, txPrev, accountsRes, cardsRes, schedMonthRes, schedWeekRes, cardCommitRes, cardTxRes, cumulativePendingRes] = await Promise.all([
         supabase
           .from("transactions")
           .select("id, family_id, user_id, card_id, category_id, amount, type, status, date, is_installment, is_recurring, categories ( id, name, icon, color )")
@@ -277,6 +285,16 @@ const DashboardPage = () => {
           .not("card_id", "is", null)
           .gte("date", toISODate(new Date(Date.now() - 60 * 86400000)))
           .lte("date", toISODate(new Date(Date.now() + 90 * 86400000))),
+        // Pendências cumulativas (não-cartão) entre hoje e o fim do mês visualizado.
+        // Usado pra Caixa Projetado acumular meses futuros corretamente.
+        supabase
+          .from("transactions")
+          .select("id, card_id, amount, type, status, date")
+          .eq("family_id", family.id)
+          .neq("status", "paid")
+          .is("card_id", null)
+          .gte("date", todayIso)
+          .lte("date", cumulativeEndIso),
       ]);
 
       setTransactions((txCurrent.data as TransactionRow[] | null) ?? []);
@@ -285,6 +303,7 @@ const DashboardPage = () => {
       setCards((cardsRes.data as CardRow[] | null) ?? []);
       setCardCommitments((cardCommitRes.data as Pick<TransactionRow, "card_id" | "amount" | "type">[] | null) ?? []);
       setCardTransactions((cardTxRes.data as Pick<TransactionRow, "card_id" | "amount" | "date" | "status" | "category_id" | "categories">[] | null) ?? []);
+      setCumulativePendingTxs((cumulativePendingRes.data as Pick<TransactionRow, "id" | "card_id" | "amount" | "type" | "status" | "date">[] | null) ?? []);
       setScheduledMonth((schedMonthRes.data as ScheduledPaymentRow[] | null) ?? []);
       setScheduledWeek((schedWeekRes.data as ScheduledPaymentRow[] | null) ?? []);
       setLoading(false);
@@ -360,16 +379,50 @@ const DashboardPage = () => {
     return events;
   }, [cards, cardTransactions, monthStart]);
 
+  // Projeção cumulativa: do saldo atual, somamos todas as pendências (não-cartão)
+  // entre hoje e o fim do mês visualizado, e descontamos todas as faturas de cartão
+  // cujo vencimento cai nessa mesma janela. Assim, ao navegar pra meses futuros, o
+  // saldo projetado acumula os meses intermediários (ex: maio +500 + junho +300 = 800
+  // de variação sobre o saldo atual). Pra meses passados, a janela fica vazia e a
+  // projeção iguala o saldo atual.
   const projectedCash = useMemo(() => {
-    const pendingIncome = transactions
-      .filter((tx) => tx.type === "income" && tx.status !== "paid" && !tx.card_id)
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    if (monthEnd < today) return totalBankBalance;
+
+    const pendingIncome = cumulativePendingTxs
+      .filter((tx) => tx.type === "income")
       .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
-    const pendingExpense = transactions
-      .filter((tx) => tx.type === "expense" && tx.status !== "paid" && !tx.card_id)
+    const pendingExpense = cumulativePendingTxs
+      .filter((tx) => tx.type === "expense")
       .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
-    const cardInvoiceTotal = cardInvoiceProjections.reduce((sum, ev) => sum + ev.amount, 0);
+
+    // Faturas de cartão cujo vencimento cai entre hoje e o fim do mês visualizado.
+    // Iteramos cada cartão por cada mês na janela e somamos o que ainda está unpaid.
+    let cardInvoiceTotal = 0;
+    const startMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+    const endMonth = new Date(monthEnd.getFullYear(), monthEnd.getMonth(), 1);
+    cards.forEach((card) => {
+      const closingDay = Number(card.closing_day || 0);
+      const dueDay = Number(card.due_day || 0);
+      if (!closingDay || !dueDay) return;
+      const cursor = new Date(startMonth);
+      while (cursor <= endMonth) {
+        const cycle = getInvoiceCycleForMonth(closingDay, dueDay, cursor.getFullYear(), cursor.getMonth());
+        if (cycle.dueDate >= today && cycle.dueDate <= monthEnd) {
+          const cycleStartIso = toISODate(cycle.cycleStart);
+          const cycleEndIso = toISODate(cycle.cycleEnd);
+          const unpaid = cardTransactions
+            .filter((tx) => tx.card_id === card.id && tx.date >= cycleStartIso && tx.date <= cycleEndIso && tx.status !== "paid")
+            .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+          cardInvoiceTotal += unpaid;
+        }
+        cursor.setMonth(cursor.getMonth() + 1);
+      }
+    });
+
     return totalBankBalance + pendingIncome - pendingExpense - cardInvoiceTotal;
-  }, [transactions, totalBankBalance, cardInvoiceProjections]);
+  }, [cumulativePendingTxs, cards, cardTransactions, monthEnd, totalBankBalance]);
 
   const projectedDelta = projectedCash - totalBankBalance;
 
@@ -634,7 +687,7 @@ const DashboardPage = () => {
             <p className={cn("mt-1 text-2xl font-bold tabular-nums", projectedCash >= 0 ? "text-foreground" : "text-destructive")}>
               {ptCurrency.format(projectedCash)}
             </p>
-            <p className="text-xs text-muted-foreground">Saldo + pendências do mês</p>
+            <p className="text-xs text-muted-foreground">Saldo + pendências até fim do mês</p>
           </div>
           <div className="sm:border-l sm:border-border sm:pl-4">
             <p className="text-xs font-semibold uppercase tracking-[0.5px] text-muted-foreground">Variação prevista</p>
