@@ -65,6 +65,8 @@ type TransactionRow = {
   is_recurring?: boolean | null;
   recurrence_type?: string | null;
   recurrence_parent_id?: string | null;
+  linked_user_id?: string | null;
+  linked_pair_id?: string | null;
   categories?: { id?: string; name?: string; color?: string | null; type?: string | null; icon?: string | null } | { id?: string; name?: string; color?: string | null; type?: string | null; icon?: string | null }[] | null;
   accounts?: { id?: string; name?: string; institution?: string | null } | { id?: string; name?: string; institution?: string | null }[] | null;
   cards?: { id?: string; name?: string; brand?: string | null } | { id?: string; name?: string; brand?: string | null }[] | null;
@@ -173,6 +175,7 @@ const TransactionsPage = () => {
   const [recurrenceType, setRecurrenceType] = useState<RecurrenceType>("monthly");
   const [tags, setTags] = useState<string[]>([]);
   const [notes, setNotes] = useState("");
+  const [linkedMemberId, setLinkedMemberId] = useState<string>("none");
   const [formError, setFormError] = useState<string | null>(null);
 
   const monthStart = useMemo(() => startOfMonth(selectedMonth), [selectedMonth]);
@@ -305,6 +308,7 @@ const TransactionsPage = () => {
     setRecurrenceType("monthly");
     setTags([]);
     setNotes("");
+    setLinkedMemberId("none");
     setFormError(null);
   };
 
@@ -517,6 +521,21 @@ const TransactionsPage = () => {
       });
       const { error } = await supabase.from("transactions").insert(rows);
       if (error) errorMessage = error.message;
+    } else if (linkedMemberId && linkedMemberId !== "none" && parsed.data.type !== "transfer" && !parsed.data.isInstallment) {
+      // Transação vinculada com outro membro: cria o par via RPC.
+      // O espelho aparece pra outra pessoa com tipo invertido + status pending.
+      const { error } = await supabase.rpc("create_linked_transaction", {
+        p_amount: parsed.data.amountCents / 100,
+        p_date: parsed.data.date,
+        p_description: parsed.data.description.trim(),
+        p_type: parsed.data.type,
+        p_status: baseStatus,
+        p_other_user_id: linkedMemberId,
+        p_category_id: parsed.data.type === "transfer" ? null : parsed.data.categoryId,
+        p_account_id: parsed.data.type === "transfer" ? parsed.data.fromAccountId : parsed.data.type === "expense" && parsed.data.cardId ? null : parsed.data.accountId,
+        p_notes: parsed.data.notes?.trim() || null,
+      });
+      if (error) errorMessage = error.message;
     } else {
       const { error } = await supabase.from("transactions").insert({ ...base, type: parsed.data.type, user_id: ctx.userId, family_id: ctx.familyId });
       if (error) errorMessage = error.message;
@@ -540,8 +559,20 @@ const TransactionsPage = () => {
     setDeleteOpen(true);
   };
 
-  const executeDelete = async (mode: "one" | "remaining" | "all") => {
+  const executeDelete = async (mode: "one" | "remaining" | "all" | "pair") => {
     if (!deleteTarget) return;
+    if (mode === "pair" && deleteTarget.linked_pair_id) {
+      const { error } = await supabase.rpc("delete_linked_pair", { p_pair_id: deleteTarget.linked_pair_id });
+      if (error) {
+        toast.error("Não foi possível excluir o par");
+        return;
+      }
+      setDeleteOpen(false);
+      setDeleteTarget(null);
+      await loadData();
+      toast.success("Par excluído nos dois membros");
+      return;
+    }
     const isRecurringTarget = Boolean(deleteTarget.is_recurring) || Boolean(deleteTarget.recurrence_parent_id);
     const recurrenceRootId = deleteTarget.recurrence_parent_id ?? (deleteTarget.is_recurring ? deleteTarget.id : null);
     let query = supabase.from("transactions").delete();
@@ -764,13 +795,14 @@ const TransactionsPage = () => {
                     const memberInitials = member?.initials || memberName.slice(0, 1).toUpperCase();
                     const installmentLabel = tx.installment_current && tx.installment_total ? ` (${tx.installment_current}/${tx.installment_total})` : "";
                     const isRecurringRow = Boolean(tx.is_recurring) || Boolean(tx.recurrence_parent_id);
+                    const linkedMember = tx.linked_user_id ? memberMap.get(tx.linked_user_id) : null;
                     const valuePrefix = tx.type === "income" ? "+" : tx.type === "expense" ? "-" : "";
                     const valueColor = tx.type === "income" ? "text-success" : tx.type === "expense" ? "text-destructive" : "text-info";
 
                     return (
                       <TableRow key={tx.id} className="group cursor-pointer border-b border-border bg-transparent hover:bg-secondary" onClick={() => openEdit(tx)}>
                         <TableCell className="px-4 py-3 text-sm text-muted-foreground">{formatDateDDMM(tx.date)}</TableCell>
-                        <TableCell className="px-4 py-3 text-sm font-medium text-foreground"><span>{tx.description || "Sem descrição"}</span>{installmentLabel && <span className="text-muted-foreground">{installmentLabel}</span>}{isRecurringRow && <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-semibold text-primary"><Repeat className="h-3 w-3" />Recorrente</span>}</TableCell>
+                        <TableCell className="px-4 py-3 text-sm font-medium text-foreground"><span>{tx.description || "Sem descrição"}</span>{installmentLabel && <span className="text-muted-foreground">{installmentLabel}</span>}{isRecurringRow && <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-semibold text-primary"><Repeat className="h-3 w-3" />Recorrente</span>}{tx.linked_pair_id && <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-info/15 px-2 py-0.5 text-[10px] font-semibold text-info">↔ {linkedMember?.name ?? "Vinculada"}</span>}</TableCell>
                         <TableCell className="px-4 py-3 text-sm text-muted-foreground"><div className="flex items-center gap-2"><span className="h-2 w-2 rounded-full" style={{ backgroundColor: category?.color || "hsl(var(--muted-foreground))" }} />{category?.name || "Sem categoria"}</div></TableCell>
                         <TableCell className={cn("px-4 py-3 text-sm font-semibold tabular-nums", valueColor)}>
                           {computedStatus !== "paid" && (
@@ -928,6 +960,35 @@ const TransactionsPage = () => {
               </div>
             )}
 
+            {!editing && formType !== "transfer" && !isInstallment && members.filter((m) => m.user_id !== user?.id).length > 0 && (
+              <div className="space-y-2 rounded-lg border border-border bg-secondary/30 p-3">
+                <Label className="text-sm font-medium text-foreground">Vincular com outro membro (opcional)</Label>
+                <p className="text-xs text-muted-foreground">
+                  {formType === "income"
+                    ? "Cria uma despesa pendente pra essa pessoa no mesmo dia/valor."
+                    : "Cria uma receita pendente pra essa pessoa no mesmo dia/valor."}
+                </p>
+                <Select value={linkedMemberId} onValueChange={setLinkedMemberId}>
+                  <SelectTrigger className="h-[42px] rounded-lg border-border bg-secondary text-foreground">
+                    <SelectValue placeholder="Sem vínculo" />
+                  </SelectTrigger>
+                  <SelectContent className="border-border bg-card text-card-foreground">
+                    <SelectItem value="none">Sem vínculo</SelectItem>
+                    {members
+                      .filter((m) => m.user_id !== user?.id)
+                      .map((m) => {
+                        const fullName = m.profiles?.full_name?.trim() || m.profiles?.email || "Membro";
+                        return (
+                          <SelectItem key={m.user_id} value={m.user_id}>
+                            {fullName}
+                          </SelectItem>
+                        );
+                      })}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
             <div className="space-y-2"><Label className="text-xs text-muted-foreground">Tags (opcional)</Label><TagsInput value={tags} onChange={setTags} placeholder="ex: trabalho, viagem, presente" /></div>
             <div className="space-y-2"><Label className="text-xs text-muted-foreground">Notas</Label><Textarea value={notes} onChange={(e) => setNotes(e.target.value.slice(0, 600))} rows={3} className="resize-y rounded-lg border-border bg-secondary text-foreground" /></div>
             {formError && <p className="text-sm text-destructive">{formError}</p>}
@@ -947,6 +1008,13 @@ const TransactionsPage = () => {
             <div className="space-y-3"><p className="text-sm text-muted-foreground">Escolha como excluir esta transação parcelada:</p><Button variant="outline" className="w-full justify-start border-border bg-secondary" onClick={() => void executeDelete("one")}>Excluir só esta parcela</Button><Button variant="outline" className="w-full justify-start border-border bg-secondary" onClick={() => void executeDelete("remaining")}>Excluir todas as parcelas restantes</Button><Button variant="destructive" className="w-full justify-start" onClick={() => void executeDelete("all")}>Excluir todas as parcelas</Button><Button variant="ghost" className="w-full" onClick={() => setDeleteOpen(false)}>Cancelar</Button></div>
           ) : (deleteTarget?.is_recurring || deleteTarget?.recurrence_parent_id) ? (
             <div className="space-y-3"><p className="text-sm text-muted-foreground">Escolha como excluir esta transação recorrente:</p><Button variant="outline" className="w-full justify-start border-border bg-secondary" onClick={() => void executeDelete("one")}>Excluir só esta ocorrência</Button><Button variant="outline" className="w-full justify-start border-border bg-secondary" onClick={() => void executeDelete("remaining")}>Excluir esta e as futuras</Button><Button variant="destructive" className="w-full justify-start" onClick={() => void executeDelete("all")}>Excluir todas as ocorrências</Button><Button variant="ghost" className="w-full" onClick={() => setDeleteOpen(false)}>Cancelar</Button></div>
+          ) : deleteTarget?.linked_pair_id ? (
+            <div className="space-y-3">
+              <p className="text-sm text-muted-foreground">Esta transação está vinculada com outro membro. Como deseja excluir?</p>
+              <Button variant="outline" className="w-full justify-start border-border bg-secondary" onClick={() => void executeDelete("one")}>Excluir só a minha</Button>
+              <Button variant="destructive" className="w-full justify-start" onClick={() => void executeDelete("pair")}>Excluir nos dois membros</Button>
+              <Button variant="ghost" className="w-full" onClick={() => setDeleteOpen(false)}>Cancelar</Button>
+            </div>
           ) : (
             <div className="space-y-4"><p className="text-sm text-muted-foreground">Tem certeza que deseja excluir esta transação?</p><div className="flex justify-end gap-2"><Button variant="outline" className="border-border bg-secondary" onClick={() => setDeleteOpen(false)}>Cancelar</Button><Button variant="destructive" onClick={() => void executeDelete("one")}>Excluir</Button></div></div>
           )}
