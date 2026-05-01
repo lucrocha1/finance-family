@@ -90,16 +90,19 @@ const darkenHex = (hex: string, factor = 0.64) => {
   return `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}`;
 };
 
+// Convenção: compra no dia do fechamento entra na PRÓXIMA fatura.
+// Cycle de fatura M = [closingDay do mês anterior, closingDay do mês M - 1 dia].
 const getCycleWindow = (closingDay: number, invoiceMonth: Date) => {
   const year = invoiceMonth.getFullYear();
   const month = invoiceMonth.getMonth();
   const prevMonthDate = new Date(year, month - 1, 1);
   const prevMonthLastDay = new Date(prevMonthDate.getFullYear(), prevMonthDate.getMonth() + 1, 0).getDate();
   const currentMonthLastDay = new Date(year, month + 1, 0).getDate();
-  const prevClosing = new Date(prevMonthDate.getFullYear(), prevMonthDate.getMonth(), Math.min(closingDay, prevMonthLastDay));
-  const cycleStart = new Date(prevClosing);
-  cycleStart.setDate(cycleStart.getDate() + 1);
+  // cycleStart = dia do fechamento do mês anterior (compras nesse dia entram aqui)
+  const cycleStart = new Date(prevMonthDate.getFullYear(), prevMonthDate.getMonth(), Math.min(closingDay, prevMonthLastDay));
+  // cycleEnd = dia ANTERIOR ao fechamento deste mês (closingDay vai pra próxima fatura)
   const cycleEnd = new Date(year, month, Math.min(closingDay, currentMonthLastDay));
+  cycleEnd.setDate(cycleEnd.getDate() - 1);
   return { start: toISODate(cycleStart), end: toISODate(cycleEnd) };
 };
 
