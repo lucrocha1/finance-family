@@ -172,7 +172,10 @@ const DashboardPage = () => {
   const [cardCommitments, setCardCommitments] = useState<CardCommitmentRow[]>([]);
   const [cardTransactions, setCardTransactions] = useState<Pick<TransactionRow, "card_id" | "amount" | "date" | "status" | "category_id" | "categories">[]>([]);
   const [cumulativePendingTxs, setCumulativePendingTxs] = useState<Pick<TransactionRow, "id" | "card_id" | "amount" | "type" | "status" | "date">[]>([]);
-  const [cumulativeDebts, setCumulativeDebts] = useState<DebtForProjection[]>([]);
+  // Dívidas ativas com due_date em [min(monthStart, hoje), monthEnd]. Usadas
+  // tanto pra projeção cumulativa (Caixa Projetado) quanto pro Fluxo do
+  // Período / gráfico de Fluxo de Caixa (mês visualizado).
+  const [activeDebts, setActiveDebts] = useState<(DebtForProjection & { due_date: string })[]>([]);
   const [scheduledMonth, setScheduledMonth] = useState<ScheduledPaymentRow[]>([]);
   const [scheduledWeek, setScheduledWeek] = useState<ScheduledPaymentRow[]>([]);
 
@@ -203,7 +206,7 @@ const DashboardPage = () => {
       setCardCommitments([]);
       setCardTransactions([]);
       setCumulativePendingTxs([]);
-      setCumulativeDebts([]);
+      setActiveDebts([]);
       setScheduledMonth([]);
       setScheduledWeek([]);
       return;
@@ -217,7 +220,11 @@ const DashboardPage = () => {
       // Janela cumulativa: de hoje até o fim do mês visualizado.
       // Se o mês visualizado é passado, o range fica vazio (start > end) → sem projeção.
       const cumulativeEndIso = toISODate(monthEnd);
-      const [txCurrent, txPrev, accountsRes, cardsRes, schedMonthRes, schedWeekRes, cardCommitRes, cardTxRes, cumulativePendingRes, cumulativeDebtsRes] = await Promise.all([
+      // Início da janela de dívidas: cobre o mês visualizado inteiro pra alimentar
+      // Fluxo do Período (que olha o mês todo) E a janela cumulativa hoje→monthEnd
+      // pra projeção (que pode ir além do mês visualizado quando navega pra futuro).
+      const debtStartIso = toISODate(monthStart < today ? monthStart : today);
+      const [txCurrent, txPrev, accountsRes, cardsRes, schedMonthRes, schedWeekRes, cardCommitRes, cardTxRes, cumulativePendingRes, activeDebtsRes] = await Promise.all([
         supabase
           .from("transactions")
           .select("id, family_id, user_id, card_id, category_id, amount, type, status, date, is_installment, is_recurring, categories ( id, name, icon, color )")
@@ -283,15 +290,17 @@ const DashboardPage = () => {
           .is("card_id", null)
           .gte("date", todayIso)
           .lte("date", cumulativeEndIso),
-        // Dívidas/empréstimos ativos com vencimento na janela de projeção.
-        // Entram no Caixa Projetado: i_owe sai do caixa, they_owe entra.
+        // Dívidas/empréstimos ativos com vencimento na janela
+        // [min(monthStart, hoje), monthEnd]. Cobre tanto o mês visualizado
+        // (pra Fluxo do Período / gráfico) quanto a janela cumulativa
+        // (pra Caixa Projetado / Variação Prevista). Filtragem fina é local.
         supabase
           .from("debts")
           .select("status, direction, due_date, total_with_interest, original_amount, amount_paid, has_installments, installment_amount")
           .eq("family_id", family.id)
           .eq("status", "active")
           .not("due_date", "is", null)
-          .gte("due_date", todayIso)
+          .gte("due_date", debtStartIso)
           .lte("due_date", cumulativeEndIso),
       ]);
 
@@ -302,7 +311,7 @@ const DashboardPage = () => {
       setCardCommitments((cardCommitRes.data as CardCommitmentRow[] | null) ?? []);
       setCardTransactions((cardTxRes.data as Pick<TransactionRow, "card_id" | "amount" | "date" | "status" | "category_id" | "categories">[] | null) ?? []);
       setCumulativePendingTxs((cumulativePendingRes.data as Pick<TransactionRow, "id" | "card_id" | "amount" | "type" | "status" | "date">[] | null) ?? []);
-      setCumulativeDebts((cumulativeDebtsRes.data as DebtForProjection[] | null) ?? []);
+      setActiveDebts((activeDebtsRes.data as (DebtForProjection & { due_date: string })[] | null) ?? []);
       setScheduledMonth((schedMonthRes.data as ScheduledPaymentRow[] | null) ?? []);
       setScheduledWeek((schedWeekRes.data as ScheduledPaymentRow[] | null) ?? []);
       setLoading(false);
@@ -331,18 +340,55 @@ const DashboardPage = () => {
     return result;
   }, [cards, cardTransactions, monthStart]);
 
+  // Impacto de uma dívida no fluxo (montante que sai/entra do caixa).
+  // Para parceladas, usa a próxima parcela; à vista, usa o restante.
+  const debtCashAmount = (debt: DebtForProjection) => {
+    const total = Number(debt.total_with_interest ?? debt.original_amount ?? 0);
+    const remaining = Math.max(0, total - Number(debt.amount_paid ?? 0));
+    if (remaining <= 0) return 0;
+    const installment = Number(debt.installment_amount ?? 0);
+    return debt.has_installments && installment > 0 ? Math.min(installment, remaining) : remaining;
+  };
+
+  // Dívidas com vencimento no mês visualizado — alimentam Fluxo do Período
+  // e gráfico de Fluxo de Caixa.
+  const monthDebts = useMemo(() => {
+    const startIso = toISODate(monthStart);
+    const endIso = toISODate(monthEnd);
+    return activeDebts.filter((d) => d.due_date >= startIso && d.due_date <= endIso);
+  }, [activeDebts, monthEnd, monthStart]);
+
+  // Dívidas na janela cumulativa hoje→monthEnd — alimentam Caixa Projetado.
+  const cumulativeDebts = useMemo(() => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const todayIso = toISODate(today);
+    const endIso = toISODate(monthEnd);
+    return activeDebts.filter((d) => d.due_date >= todayIso && d.due_date <= endIso);
+  }, [activeDebts, monthEnd]);
+
   const totals = useMemo(() => {
     const isCash = (tx: TransactionRow) => !tx.card_id;
-    const income = transactions.filter((tx) => tx.type === "income" && isCash(tx)).reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+    const incomeTx = transactions.filter((tx) => tx.type === "income" && isCash(tx)).reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
     const expenseDirect = transactions.filter((tx) => tx.type === "expense" && isCash(tx)).reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
     const expenseCardPending = cardTxsDueInMonth
       .filter((tx) => tx.status !== "paid")
       .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
-    const expense = expenseDirect + expenseCardPending;
+    // Dívidas vencendo no mês: i_owe entra como despesa, they_owe como receita.
+    let debtExpense = 0;
+    let debtIncome = 0;
+    monthDebts.forEach((d) => {
+      const amount = debtCashAmount(d);
+      if (amount <= 0) return;
+      if (d.direction === "they_owe") debtIncome += amount;
+      else debtExpense += amount;
+    });
+    const income = incomeTx + debtIncome;
+    const expense = expenseDirect + expenseCardPending + debtExpense;
     const previousIncome = previousTransactions.filter((tx) => tx.type === "income" && isCash(tx)).reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
     const previousExpense = previousTransactions.filter((tx) => tx.type === "expense" && isCash(tx)).reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
     return { income, expense, balance: income - expense, previousBalance: previousIncome - previousExpense };
-  }, [cardTxsDueInMonth, previousTransactions, transactions]);
+  }, [cardTxsDueInMonth, monthDebts, previousTransactions, transactions]);
 
   const balanceVariation = useMemo(() => {
     const current = totals.balance;
@@ -585,6 +631,15 @@ const DashboardPage = () => {
         if (index < 0 || index >= rows.length) return;
         rows[index].change -= ev.amount;
       });
+      // Dívidas/empréstimos vencendo no mês: i_owe sai do caixa, they_owe entra.
+      monthDebts.forEach((debt) => {
+        const amount = debtCashAmount(debt);
+        if (amount <= 0) return;
+        const day = new Date(`${debt.due_date}T00:00:00`).getDate();
+        const index = day - 1;
+        if (index < 0 || index >= rows.length) return;
+        rows[index].change += debt.direction === "they_owe" ? amount : -amount;
+      });
     }
 
     let running = 0;
@@ -592,7 +647,7 @@ const DashboardPage = () => {
       running += row.change;
       return { ...row, saldo: running };
     });
-  }, [cardInvoiceProjections, flowTab, monthEnd, transactions]);
+  }, [cardInvoiceProjections, flowTab, monthDebts, monthEnd, transactions]);
 
   const flowLastValue = flowData[flowData.length - 1]?.saldo ?? 0;
 
