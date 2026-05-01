@@ -43,6 +43,14 @@ export type CardCommitment = {
 export type CardSpentResult = {
   cardId: string;
   spent: number;
+  // Quebra de spent: ciclo aberto vs ciclos futuros (parcelas/recorrentes
+  // que ainda não chegaram). Ajuda o usuário a identificar de onde vem o
+  // valor quando o total parece alto demais.
+  currentCycle: number;
+  currentCycleCount: number;
+  futureCycles: number;
+  futureCount: number;
+  // Lixo de ciclos passados (não conta no spent)
   overdue: number;
   overdueCount: number;
   limit: number;
@@ -65,12 +73,18 @@ export const computeSpentByCard = (
     const limit = Number(card.credit_limit || 0);
 
     let cycleStartIso: string | null = null;
+    let cycleEndIso: string | null = null;
     if (closingDay > 0 && dueDay > 0) {
       const cycle = getOpenInvoiceWindow(closingDay, dueDay, todayLocal);
       cycleStartIso = toIso(cycle.invoiceStart);
+      cycleEndIso = toIso(cycle.invoiceEnd);
     }
 
     let spent = 0;
+    let currentCycle = 0;
+    let currentCycleCount = 0;
+    let futureCycles = 0;
+    let futureCount = 0;
     let overdue = 0;
     let overdueCount = 0;
 
@@ -82,7 +96,13 @@ export const computeSpentByCard = (
       if (cycleStartIso && tx.date < cycleStartIso) {
         overdue += amount;
         overdueCount += 1;
+      } else if (cycleEndIso && tx.date > cycleEndIso) {
+        futureCycles += amount;
+        futureCount += 1;
+        spent += amount;
       } else {
+        currentCycle += amount;
+        currentCycleCount += 1;
         spent += amount;
       }
     }
@@ -90,7 +110,19 @@ export const computeSpentByCard = (
     const available = Math.max(limit - spent, 0);
     const ratio = limit > 0 ? Math.min((spent / limit) * 100, 100) : 0;
 
-    result.set(card.id, { cardId: card.id, spent, overdue, overdueCount, limit, available, ratio });
+    result.set(card.id, {
+      cardId: card.id,
+      spent,
+      currentCycle,
+      currentCycleCount,
+      futureCycles,
+      futureCount,
+      overdue,
+      overdueCount,
+      limit,
+      available,
+      ratio,
+    });
   }
 
   return result;

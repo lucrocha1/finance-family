@@ -410,6 +410,10 @@ const DashboardPage = () => {
         return {
           ...card,
           spent: r?.spent ?? 0,
+          currentCycle: r?.currentCycle ?? 0,
+          currentCycleCount: r?.currentCycleCount ?? 0,
+          futureCycles: r?.futureCycles ?? 0,
+          futureCount: r?.futureCount ?? 0,
           overdue: r?.overdue ?? 0,
           overdueCount: r?.overdueCount ?? 0,
           limit: r?.limit ?? Number(card.credit_limit || 0),
@@ -889,6 +893,22 @@ const DashboardPage = () => {
                       <p className="text-xs text-muted-foreground">de {ptCurrency.format(card.limit)}</p>
                       <div className="h-2 w-full rounded-full bg-secondary"><div className={cn("h-2 rounded-full transition-all", usageColor)} style={{ width: `${card.ratio}%` }} /></div>
                       <p className="text-xs text-muted-foreground">Disponível: {ptCurrency.format(card.available)} ({Math.max(100 - card.ratio, 0).toFixed(0)}%)</p>
+                      {(card.currentCycle > 0 || card.futureCycles > 0) && (
+                        <div className="flex flex-wrap gap-2 text-[11px] text-muted-foreground">
+                          {card.currentCycle > 0 && (
+                            <span className="inline-flex items-center gap-1 rounded-md bg-secondary/60 px-2 py-0.5">
+                              Aberta: <span className="font-semibold text-foreground tabular-nums">{ptCurrency.format(card.currentCycle)}</span>
+                              <span className="opacity-70">({card.currentCycleCount})</span>
+                            </span>
+                          )}
+                          {card.futureCycles > 0 && (
+                            <Link to={`/cards/${card.id}`} className="inline-flex items-center gap-1 rounded-md bg-info/15 px-2 py-0.5 text-info hover:bg-info/20">
+                              Próximas: <span className="font-semibold tabular-nums">{ptCurrency.format(card.futureCycles)}</span>
+                              <span className="opacity-70">({card.futureCount})</span>
+                            </Link>
+                          )}
+                        </div>
+                      )}
                       {card.overdue > 0 && (
                         <Link to={`/cards/${card.id}`} className="block rounded-md border border-warning/40 bg-warning/10 px-2 py-1.5 text-[11px] text-warning hover:bg-warning/15">
                           ⚠ {card.overdueCount} {card.overdueCount === 1 ? "compra" : "compras"} de ciclos passados não pagas ({ptCurrency.format(card.overdue)}). Marcar como pagas →
