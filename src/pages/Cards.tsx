@@ -23,6 +23,7 @@ import { toast } from "@/components/ui/sonner";
 import { useAuth } from "@/contexts/AuthContext";
 import { useFamily } from "@/contexts/FamilyContext";
 import { supabase } from "@/integrations/supabase/client";
+import { computeSpentByCard, type CardSpentResult } from "@/lib/cardSpent";
 import { ensureFamily } from "@/lib/familyGuard";
 
 type CardBrand = "visa" | "mastercard" | "elo" | "amex" | "hipercard" | "outro";
@@ -42,6 +43,7 @@ type TxExpenseRow = {
   card_id: string | null;
   amount: number;
   status: string | null;
+  date: string;
 };
 
 const ptCurrency = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
@@ -120,7 +122,7 @@ const CardsPage = () => {
 
   const [loading, setLoading] = useState(true);
   const [cards, setCards] = useState<CardRow[]>([]);
-  const [monthlySpentByCard, setMonthlySpentByCard] = useState<Record<string, number>>({});
+  const [spentMap, setSpentMap] = useState<Map<string, CardSpentResult>>(new Map());
 
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -140,7 +142,7 @@ const CardsPage = () => {
   const loadData = useCallback(async () => {
     if (!family?.id) {
       setCards([]);
-      setMonthlySpentByCard({});
+      setSpentMap(new Map());
       setLoading(false);
       return;
     }
@@ -167,17 +169,18 @@ const CardsPage = () => {
     setCards(normalizedCards);
 
     if (!normalizedCards.length) {
-      setMonthlySpentByCard({});
+      setSpentMap(new Map());
       setLoading(false);
       return;
     }
 
-    // Limite comprometido = soma de despesas no cartão ainda NÃO pagas.
-    // Parcelas pagas liberam o limite na hora; parcelas futuras
-    // (status='pending') continuam comprometendo até serem quitadas.
+    // Limite comprometido = despesas do ciclo aberto + ciclos futuros
+    // (parcelas/recorrentes). Compras de ciclos passados que continuam
+    // pending são tratadas como "em atraso" e não inflam o limite, mas
+    // ficam visíveis pra reconciliação.
     const txRes = await supabase
       .from("transactions")
-      .select("card_id, amount, status")
+      .select("card_id, amount, status, date")
       .eq("type", "expense")
       .in(
         "card_id",
@@ -192,15 +195,22 @@ const CardsPage = () => {
     }
 
     const expenses = (txRes.data as TxExpenseRow[] | null) ?? [];
-    const totals: Record<string, number> = {};
+    const computed = computeSpentByCard(
+      normalizedCards.map((c) => ({
+        id: c.id,
+        credit_limit: c.credit_limit,
+        closing_day: c.closing_day,
+        due_day: c.due_day,
+      })),
+      expenses.map((tx) => ({
+        card_id: tx.card_id,
+        amount: tx.amount,
+        status: tx.status,
+        date: tx.date,
+      })),
+    );
 
-    normalizedCards.forEach((card) => {
-      totals[card.id] = expenses
-        .filter((tx) => tx.card_id === card.id)
-        .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
-    });
-
-    setMonthlySpentByCard(totals);
+    setSpentMap(computed);
     setLoading(false);
   }, [family?.id]);
 
@@ -320,19 +330,24 @@ const CardsPage = () => {
   const cardsWithUsage = useMemo(
     () =>
       cards.map((card) => {
-        const spent = Number(monthlySpentByCard[card.id] ?? 0);
+        const r = spentMap.get(card.id);
+        const spent = r?.spent ?? 0;
+        const overdue = r?.overdue ?? 0;
+        const overdueCount = r?.overdueCount ?? 0;
         const limit = Number(card.credit_limit ?? 0);
         const usedPct = limit > 0 ? Math.min((spent / limit) * 100, 100) : 0;
         const available = Math.max(limit - spent, 0);
-        return { ...card, spent, limit, usedPct, available };
+        return { ...card, spent, overdue, overdueCount, limit, usedPct, available };
       }),
-    [cards, monthlySpentByCard],
+    [cards, spentMap],
   );
 
   const summary = useMemo(() => {
     const totalLimit = cardsWithUsage.reduce((sum, card) => sum + card.limit, 0);
     const totalUsed = cardsWithUsage.reduce((sum, card) => sum + card.spent, 0);
-    return { totalLimit, totalUsed, totalAvailable: Math.max(totalLimit - totalUsed, 0) };
+    const totalOverdue = cardsWithUsage.reduce((sum, card) => sum + card.overdue, 0);
+    const totalOverdueCount = cardsWithUsage.reduce((sum, card) => sum + card.overdueCount, 0);
+    return { totalLimit, totalUsed, totalAvailable: Math.max(totalLimit - totalUsed, 0), totalOverdue, totalOverdueCount };
   }, [cardsWithUsage]);
 
   return (
@@ -358,6 +373,16 @@ const CardsPage = () => {
           <p className="mt-2 text-3xl font-bold text-emerald-500">{ptCurrency.format(summary.totalAvailable)}</p>
         </div>
       </div>
+
+      {summary.totalOverdue > 0 && (
+        <div className="rounded-xl border border-warning/40 bg-warning/10 p-4 text-sm">
+          <p className="font-semibold text-warning">Reconciliação pendente</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {summary.totalOverdueCount} {summary.totalOverdueCount === 1 ? "compra antiga" : "compras antigas"} no cartão continua pending ({ptCurrency.format(summary.totalOverdue)}).
+            Elas <span className="font-medium text-foreground">não estão inflando o limite atual</span>, mas o ideal é abrir cada cartão, navegar pra a fatura do ciclo correspondente e clicar em "Pagar Fatura" pra marcar como pagas.
+          </p>
+        </div>
+      )}
 
       {loading ? (
         <PageSkeleton rows={3} />
@@ -399,6 +424,11 @@ const CardsPage = () => {
                     </span>
                     <span>{Math.round(card.usedPct)}%</span>
                   </div>
+                  {card.overdue > 0 && (
+                    <p className="mt-2 text-[11px] text-yellow-200/90">
+                      ⚠ {card.overdueCount} {card.overdueCount === 1 ? "compra" : "compras"} de ciclos passados não pagas ({ptCurrency.format(card.overdue)})
+                    </p>
+                  )}
                 </div>
 
                 <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/35 opacity-0 transition-opacity duration-200 group-hover:opacity-100">

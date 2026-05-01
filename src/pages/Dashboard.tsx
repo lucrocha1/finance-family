@@ -35,6 +35,7 @@ import { useUpcomingDueDates } from "@/hooks/useUpcomingDueDates";
 import { useEnsureRecurrencesUpTo } from "@/hooks/useEnsureRecurrencesUpTo";
 import { supabase } from "@/integrations/supabase/client";
 import { getInvoiceCycleForMonth, getOpenInvoiceWindow } from "@/lib/cardCycle";
+import { computeSpentByCard } from "@/lib/cardSpent";
 import { useChartColors } from "@/lib/chartColors";
 import { computeProjectedCash } from "@/lib/projectedCash";
 import { cn } from "@/lib/utils";
@@ -165,7 +166,7 @@ const DashboardPage = () => {
   const [previousTransactions, setPreviousTransactions] = useState<TransactionRow[]>([]);
   const [accounts, setAccounts] = useState<AccountRow[]>([]);
   const [cards, setCards] = useState<CardRow[]>([]);
-  const [cardCommitments, setCardCommitments] = useState<Pick<TransactionRow, "card_id" | "amount" | "type">[]>([]);
+  const [cardCommitments, setCardCommitments] = useState<Pick<TransactionRow, "card_id" | "amount" | "type" | "status" | "date">[]>([]);
   const [cardTransactions, setCardTransactions] = useState<Pick<TransactionRow, "card_id" | "amount" | "date" | "status" | "category_id" | "categories">[]>([]);
   const [cumulativePendingTxs, setCumulativePendingTxs] = useState<Pick<TransactionRow, "id" | "card_id" | "amount" | "type" | "status" | "date">[]>([]);
   const [scheduledMonth, setScheduledMonth] = useState<ScheduledPaymentRow[]>([]);
@@ -238,11 +239,13 @@ const DashboardPage = () => {
           .eq("family_id", family.id)
           .gte("due_date", toISODate(weekStart))
           .lte("due_date", toISODate(weekEnd)),
-        // Compromissos do cartão = todas as despesas com cartão ainda não pagas
-        // (parcelas pending de qualquer mês). É o que define "limite utilizado".
+        // Compromissos do cartão = todas as despesas com cartão ainda não pagas.
+        // Inclui date e status pra computeSpentByCard segregar entre ciclo
+        // aberto+futuros (cobra do limite) e ciclos passados (em atraso,
+        // não inflam limite atual).
         supabase
           .from("transactions")
-          .select("card_id, amount, type")
+          .select("card_id, amount, type, status, date")
           .eq("family_id", family.id)
           .eq("type", "expense")
           .neq("status", "paid")
@@ -281,7 +284,7 @@ const DashboardPage = () => {
       setPreviousTransactions((txPrev.data as TransactionRow[] | null) ?? []);
       setAccounts((accountsRes.data as AccountRow[] | null) ?? []);
       setCards((cardsRes.data as CardRow[] | null) ?? []);
-      setCardCommitments((cardCommitRes.data as Pick<TransactionRow, "card_id" | "amount" | "type">[] | null) ?? []);
+      setCardCommitments((cardCommitRes.data as Pick<TransactionRow, "card_id" | "amount" | "type" | "status" | "date">[] | null) ?? []);
       setCardTransactions((cardTxRes.data as Pick<TransactionRow, "card_id" | "amount" | "date" | "status" | "category_id" | "categories">[] | null) ?? []);
       setCumulativePendingTxs((cumulativePendingRes.data as Pick<TransactionRow, "id" | "card_id" | "amount" | "type" | "status" | "date">[] | null) ?? []);
       setScheduledMonth((schedMonthRes.data as ScheduledPaymentRow[] | null) ?? []);
@@ -392,25 +395,38 @@ const DashboardPage = () => {
     };
   }, [scheduledMonth, transactions]);
 
-  const expensesByCard = useMemo(() => {
-    // Same rule as Cards.tsx: committed limit = sum of unpaid card expenses.
-    // Parcels still pending continue to hold the limit; paid parcels release it.
-    const totalsByCard = new Map<string, number>();
-    cardCommitments
-      .filter((tx) => tx.type === "expense" && tx.card_id)
-      .forEach((tx) => {
-        if (!tx.card_id) return;
-        totalsByCard.set(tx.card_id, (totalsByCard.get(tx.card_id) ?? 0) + Number(tx.amount || 0));
-      });
-
-    return cards.map((card) => {
-      const spent = totalsByCard.get(card.id) ?? 0;
-      const limit = Number(card.credit_limit || 0);
-      const ratio = limit > 0 ? Math.min((spent / limit) * 100, 100) : 0;
-      const available = Math.max(limit - spent, 0);
-      return { ...card, spent, limit, ratio, available };
-    });
-  }, [cardCommitments, cards]);
+  // Limite utilizado por cartão usando computeSpentByCard:
+  // - spent = ciclo aberto + ciclos futuros (parcelas/recorrentes)
+  // - overdue = ciclos passados não pagos (não inflam limite, mas ficam
+  //   visíveis pra reconciliar)
+  const cardSpentMap = useMemo(
+    () => computeSpentByCard(cards, cardCommitments),
+    [cards, cardCommitments],
+  );
+  const expensesByCard = useMemo(
+    () =>
+      cards.map((card) => {
+        const r = cardSpentMap.get(card.id);
+        return {
+          ...card,
+          spent: r?.spent ?? 0,
+          overdue: r?.overdue ?? 0,
+          overdueCount: r?.overdueCount ?? 0,
+          limit: r?.limit ?? Number(card.credit_limit || 0),
+          available: r?.available ?? 0,
+          ratio: r?.ratio ?? 0,
+        };
+      }),
+    [cards, cardSpentMap],
+  );
+  const totalOverdue = useMemo(
+    () =>
+      Array.from(cardSpentMap.values()).reduce(
+        (acc, r) => ({ amount: acc.amount + r.overdue, count: acc.count + r.overdueCount }),
+        { amount: 0, count: 0 },
+      ),
+    [cardSpentMap],
+  );
 
   // Faturas abertas (próxima a vencer) por cartão.
   const openInvoices = useMemo(() => {
@@ -864,17 +880,30 @@ const DashboardPage = () => {
             {expensesByCard.length === 0 ? (
               <div className="rounded-lg border border-dashed border-border bg-secondary/20 p-4 text-sm text-muted-foreground"><p>Nenhum cartão cadastrado.</p><Link to="/cards" className="mt-2 inline-block font-medium text-primary hover:opacity-80">Ir para cartões →</Link></div>
             ) : (
-              expensesByCard.map((card) => {
-                const usageColor = card.ratio >= 80 ? "bg-destructive" : card.ratio >= 50 ? "bg-warning" : "bg-success";
-                return (
-                  <div key={card.id} className="space-y-2 rounded-lg border border-border bg-secondary/20 p-3">
-                    <div className="flex items-center justify-between gap-3"><p className="flex items-center gap-2 text-sm font-semibold"><CreditCard className="h-4 w-4 text-muted-foreground" />{card.name} {card.brand ? `- ${card.brand}` : ""}</p><p className="text-sm font-semibold tabular-nums">{ptCurrency.format(card.spent)}</p></div>
-                    <p className="text-xs text-muted-foreground">de {ptCurrency.format(card.limit)}</p>
-                    <div className="h-2 w-full rounded-full bg-secondary"><div className={cn("h-2 rounded-full transition-all", usageColor)} style={{ width: `${card.ratio}%` }} /></div>
-                    <p className="text-xs text-muted-foreground">Disponível: {ptCurrency.format(card.available)} ({Math.max(100 - card.ratio, 0).toFixed(0)}%)</p>
+              <>
+                {expensesByCard.map((card) => {
+                  const usageColor = card.ratio >= 80 ? "bg-destructive" : card.ratio >= 50 ? "bg-warning" : "bg-success";
+                  return (
+                    <div key={card.id} className="space-y-2 rounded-lg border border-border bg-secondary/20 p-3">
+                      <div className="flex items-center justify-between gap-3"><p className="flex items-center gap-2 text-sm font-semibold"><CreditCard className="h-4 w-4 text-muted-foreground" />{card.name} {card.brand ? `- ${card.brand}` : ""}</p><p className="text-sm font-semibold tabular-nums">{ptCurrency.format(card.spent)}</p></div>
+                      <p className="text-xs text-muted-foreground">de {ptCurrency.format(card.limit)}</p>
+                      <div className="h-2 w-full rounded-full bg-secondary"><div className={cn("h-2 rounded-full transition-all", usageColor)} style={{ width: `${card.ratio}%` }} /></div>
+                      <p className="text-xs text-muted-foreground">Disponível: {ptCurrency.format(card.available)} ({Math.max(100 - card.ratio, 0).toFixed(0)}%)</p>
+                      {card.overdue > 0 && (
+                        <Link to={`/cards/${card.id}`} className="block rounded-md border border-warning/40 bg-warning/10 px-2 py-1.5 text-[11px] text-warning hover:bg-warning/15">
+                          ⚠ {card.overdueCount} {card.overdueCount === 1 ? "compra" : "compras"} de ciclos passados não pagas ({ptCurrency.format(card.overdue)}). Marcar como pagas →
+                        </Link>
+                      )}
+                    </div>
+                  );
+                })}
+                {totalOverdue.amount > 0 && (
+                  <div className="rounded-lg border border-warning/30 bg-warning/5 p-3 text-xs text-muted-foreground">
+                    <p className="font-semibold text-warning">Reconciliação pendente</p>
+                    <p>Existem {totalOverdue.count} compras em ciclos passados que continuam pendentes ({ptCurrency.format(totalOverdue.amount)}). Elas não estão inflando o limite atual, mas vale revisar — abra a fatura do ciclo correspondente e clique em "Pagar Fatura" pra marcar como pagas.</p>
                   </div>
-                );
-              })
+                )}
+              </>
             )}
           </CardContent>
         </Card>
