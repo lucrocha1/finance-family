@@ -74,11 +74,6 @@ const formSchema = z.object({
   color: z.string().regex(/^#[0-9a-fA-F]{6}$/),
 });
 
-const toISODate = (date: Date) => {
-  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
-  return local.toISOString().slice(0, 10);
-};
-
 const getBrandDefaultColor = (brand: CardBrand) => {
   if (brand === "visa") return "#1e40af";
   if (brand === "mastercard") return "#dc2626";
@@ -103,19 +98,6 @@ const darkenHex = (hex: string, factor = 0.64) => {
   const g = Math.max(0, Math.round(parseInt(safe.slice(2, 4), 16) * factor));
   const b = Math.max(0, Math.round(parseInt(safe.slice(4, 6), 16) * factor));
   return `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}`;
-};
-
-const getCycleWindow = (closingDay: number, baseDate = new Date()) => {
-  const year = baseDate.getFullYear();
-  const month = baseDate.getMonth();
-  const prevMonthDate = new Date(year, month - 1, 1);
-  const prevMonthLastDay = new Date(prevMonthDate.getFullYear(), prevMonthDate.getMonth() + 1, 0).getDate();
-  const currentMonthLastDay = new Date(year, month + 1, 0).getDate();
-  const prevClosing = new Date(prevMonthDate.getFullYear(), prevMonthDate.getMonth(), Math.min(closingDay, prevMonthLastDay));
-  const cycleStart = new Date(prevClosing);
-  cycleStart.setDate(cycleStart.getDate() + 1);
-  const cycleEnd = new Date(year, month, Math.min(closingDay, currentMonthLastDay));
-  return { start: toISODate(cycleStart), end: toISODate(cycleEnd) };
 };
 
 const CardsPage = () => {
