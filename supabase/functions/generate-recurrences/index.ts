@@ -1,16 +1,18 @@
-// Generate-recurrences edge function
-// Iterates over all "parent" recurring transactions (is_recurring=true,
-// recurrence_parent_id=null) and inserts the missing instances up to 60
-// days ahead. Each child gets recurrence_parent_id pointing back to the
-// template, with status='pending'.
+// Generate-recurrences edge function — STANDBY/OPCIONAL.
 //
-// Schedule via pg_cron once per day (see supabase/migrations/<ts>_pg_cron_recurrences.sql)
-// or invoke manually: supabase functions invoke generate-recurrences
+// O cliente roda a geração via src/lib/generateRecurrences.ts (com horizonte
+// dinâmico baseado na navegação do usuário). Esta função é mantida pra
+// permitir agendamento via pg_cron caso queira garantir geração mesmo sem
+// nenhum cliente abrir o app. Lookahead deve ficar alinhado com o cliente
+// (90 dias) pra evitar divergências.
+//
+// Schedule via pg_cron uma vez por dia ou invoque manualmente:
+//   supabase functions invoke generate-recurrences
 
 // deno-lint-ignore-file no-explicit-any
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
-const LOOK_AHEAD_DAYS = 60;
+const LOOK_AHEAD_DAYS = 90;
 
 type Parent = {
   id: string;

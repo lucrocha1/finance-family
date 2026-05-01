@@ -1,6 +1,7 @@
 import { supabase } from "@/integrations/supabase/client";
 
-const LOOK_AHEAD_DAYS = 90;
+const DEFAULT_LOOK_AHEAD_DAYS = 90;
+const TARGET_BUFFER_DAYS = 30; // buffer aplicado em cima de targetEndIso
 
 type RecurrenceType = "weekly" | "monthly" | "yearly";
 
@@ -44,15 +45,44 @@ const addInterval = (iso: string, type: RecurrenceType, anchorDay: number | null
   return toIso(d);
 };
 
-// Client-side fallback that mirrors the generate-recurrences edge function.
-// Iterates parent recorrentes da família e cria as instâncias faltantes até
-// LOOK_AHEAD_DAYS no futuro. Idempotente: usa a maior data existente
-// (parent + filhos) como ponto de partida, então rodar várias vezes é seguro.
-export const generateRecurrencesForFamily = async (familyId: string, authUserId: string): Promise<{ created: number }> => {
+// Calcula horizon efetivo: max(today + 90d, targetEndIso + 30d). Se
+// targetEndIso não vier, usa só o default. Sempre como ISO date.
+const computeHorizonIso = (targetEndIso?: string | null): string => {
+  const horizonDefault = new Date();
+  horizonDefault.setDate(horizonDefault.getDate() + DEFAULT_LOOK_AHEAD_DAYS);
+  if (!targetEndIso) return toIso(horizonDefault);
+  const targetWithBuffer = new Date(`${targetEndIso}T00:00:00`);
+  targetWithBuffer.setDate(targetWithBuffer.getDate() + TARGET_BUFFER_DAYS);
+  return toIso(horizonDefault > targetWithBuffer ? horizonDefault : targetWithBuffer);
+};
+
+// Diferença em dias entre hoje e horizonIso. Usado pra calcular o
+// p_horizon_days passado pra RPC linked.
+const daysFromTodayToIso = (horizonIso: string): number => {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const target = new Date(`${horizonIso}T00:00:00`);
+  const diff = Math.ceil((target.getTime() - today.getTime()) / 86400000);
+  return Math.max(diff, 1);
+};
+
+// Gera instâncias futuras de transações recorrentes pra família. Por
+// padrão estende até hoje+90 dias; quando o usuário navega pra um mês
+// distante, passe `targetEndIso` (ex: fim do mês visualizado) e o
+// gerador estende até max(default, targetEndIso + 30 dias).
+//
+// Idempotente: usa max(date) por parent, então rodar várias vezes só
+// insere o que falta. Pra parents linked (linked_user_id presente),
+// delega na RPC security definer porque RLS impede insert com
+// user_id alheio.
+export const generateRecurrencesForFamily = async (
+  familyId: string,
+  authUserId: string,
+  targetEndIso?: string | null,
+): Promise<{ created: number }> => {
   const today = toIso(new Date());
-  const horizon = new Date();
-  horizon.setDate(horizon.getDate() + LOOK_AHEAD_DAYS);
-  const horizonIso = toIso(horizon);
+  const horizonIso = computeHorizonIso(targetEndIso);
+  const horizonDays = daysFromTodayToIso(horizonIso);
 
   const { data: parents, error: parentsErr } = await supabase
     .from("transactions")
@@ -71,14 +101,15 @@ export const generateRecurrencesForFamily = async (familyId: string, authUserId:
   for (const parent of parents as Parent[]) {
     if (!parent.recurrence_type) continue;
 
-    // Linked parents: handled by security-definer RPC porque o lado espelho
-    // pertence a outro user_id e RLS bloqueia insert direto.
+    // Linked parents — RPC security definer cobre os dois lados
     if (parent.linked_user_id && parent.user_id === authUserId) {
-      const { error: rpcErr } = await supabase.rpc("generate_linked_pair_recurrences", { p_my_parent_id: parent.id });
-      if (!rpcErr) created += 1; // count rough — RPC retorna nº de pares
+      const { data: nCreated, error: rpcErr } = await supabase.rpc("generate_linked_pair_recurrences", {
+        p_my_parent_id: parent.id,
+        p_horizon_days: horizonDays,
+      });
+      if (!rpcErr) created += Number(nCreated ?? 0);
       continue;
     }
-    // Pula parent espelho de outra ponta — só o "dono" gera via RPC
     if (parent.linked_user_id && parent.user_id !== authUserId) continue;
 
     const { data: latestRows } = await supabase

@@ -37,6 +37,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { buildCSV, downloadCSV } from "@/lib/csvExport";
 import { ensureFamily } from "@/lib/familyGuard";
 import { generateRecurrencesForFamily } from "@/lib/generateRecurrences";
+import { useEnsureRecurrencesUpTo, invalidateRecurrenceHorizon } from "@/hooks/useEnsureRecurrencesUpTo";
+import { computeProjectedCash } from "@/lib/projectedCash";
 import { priorityLabel, type PlannedItemRow } from "@/lib/plannedItems";
 import { PlannedItemDialog } from "@/components/PlannedItemDialog";
 import { SchedulePlannedDialog } from "@/components/SchedulePlannedDialog";
@@ -135,6 +137,10 @@ const TransactionsPage = () => {
   const [categories, setCategories] = useState<CategoryRow[]>([]);
   const [accounts, setAccounts] = useState<AccountRow[]>([]);
   const [cards, setCards] = useState<CardRow[]>([]);
+  const [accountBalances, setAccountBalances] = useState<Array<{ id: string; balance: number }>>([]);
+  const [cardsForCycle, setCardsForCycle] = useState<Array<{ id: string; closing_day: number | null; due_day: number | null }>>([]);
+  const [cardTxsForCycle, setCardTxsForCycle] = useState<Array<{ card_id: string | null; amount: number; date: string; status: string | null }>>([]);
+  const [cumulativePendingTxs, setCumulativePendingTxs] = useState<Array<{ type: string; amount: number; date: string; status: string | null }>>([]);
 
   const [typeFilter, setTypeFilter] = useState<"all" | "income" | "expense" | "transfer">("all");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
@@ -184,6 +190,9 @@ const TransactionsPage = () => {
   const monthStart = useMemo(() => startOfMonth(selectedMonth), [selectedMonth]);
   const monthEnd = useMemo(() => endOfMonth(selectedMonth), [selectedMonth]);
 
+  // Garante que recorrências estejam materializadas até o mês visualizado.
+  const { version: recurrenceVersion } = useEnsureRecurrencesUpTo(monthEnd);
+
   const loadData = useCallback(async () => {
     if (!family?.id) {
       setTransactions([]);
@@ -191,12 +200,34 @@ const TransactionsPage = () => {
       setAccounts([]);
       setCards([]);
       setPlannedItems([]);
+      setAccountBalances([]);
+      setCardsForCycle([]);
+      setCardTxsForCycle([]);
+      setCumulativePendingTxs([]);
       setLoading(false);
       return;
     }
 
     setLoading(true);
-    const [txRes, categoriesRes, accountsRes, cardsRes, plannedRes] = await Promise.all([
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const todayIso = toISODate(today);
+    const cumulativeEndIso = toISODate(monthEnd);
+
+    // Range pra fatura de cartão: cobre o mês visualizado mesmo se distante.
+    const cardRangeStart = toISODate(new Date(Math.min(
+      Date.now() - 60 * 86400000,
+      monthStart.getTime() - 60 * 86400000,
+    )));
+    const cardRangeEnd = toISODate(new Date(Math.max(
+      Date.now() + 90 * 86400000,
+      monthEnd.getTime() + 30 * 86400000,
+    )));
+
+    const [
+      txRes, categoriesRes, accountsRes, cardsRes, plannedRes,
+      balancesRes, cardsCycleRes, cardTxsRes, cumulativePendingRes,
+    ] = await Promise.all([
       supabase
         .from("transactions")
         .select("*, categories(*), accounts(*), cards(*)")
@@ -207,6 +238,24 @@ const TransactionsPage = () => {
       supabase.from("accounts").select("id, name, institution").order("name", { ascending: true }),
       supabase.from("cards").select("id, name, brand").order("name", { ascending: true }),
       supabase.from("planned_items").select("*").in("kind", ["expense", "income"]).order("created_at", { ascending: false }),
+      supabase.from("accounts").select("id, balance"),
+      supabase.from("cards").select("id, closing_day, due_day"),
+      supabase
+        .from("transactions")
+        .select("card_id, amount, date, status")
+        .eq("family_id", family.id)
+        .eq("type", "expense")
+        .not("card_id", "is", null)
+        .gte("date", cardRangeStart)
+        .lte("date", cardRangeEnd),
+      supabase
+        .from("transactions")
+        .select("type, amount, date, status")
+        .eq("family_id", family.id)
+        .neq("status", "paid")
+        .is("card_id", null)
+        .gte("date", todayIso)
+        .lte("date", cumulativeEndIso),
     ]);
     setPlannedItems((plannedRes.data as PlannedItemRow[] | null) ?? []);
 
@@ -229,6 +278,10 @@ const TransactionsPage = () => {
     setCategories((categoriesRes.data as CategoryRow[] | null) ?? []);
     setAccounts((accountsRes.data as AccountRow[] | null) ?? []);
     setCards((cardsRes.data as CardRow[] | null) ?? []);
+    setAccountBalances((balancesRes.data as Array<{ id: string; balance: number }> | null) ?? []);
+    setCardsForCycle((cardsCycleRes.data as Array<{ id: string; closing_day: number | null; due_day: number | null }> | null) ?? []);
+    setCardTxsForCycle((cardTxsRes.data as Array<{ card_id: string | null; amount: number; date: string; status: string | null }> | null) ?? []);
+    setCumulativePendingTxs((cumulativePendingRes.data as Array<{ type: string; amount: number; date: string; status: string | null }> | null) ?? []);
     setLoading(false);
   }, [family?.id, monthEnd, monthStart]);
 
@@ -238,7 +291,7 @@ const TransactionsPage = () => {
 
   useEffect(() => {
     void loadData();
-  }, [loadData]);
+  }, [loadData, recurrenceVersion]);
 
   const memberMap = useMemo(() => {
     const map = new Map<string, { name: string; initials: string }>();
@@ -281,6 +334,24 @@ const TransactionsPage = () => {
     const expense = filtered.filter((tx) => tx.type === "expense").reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
     return { income, expense, balance: income - expense };
   }, [filtered]);
+
+  const totalBankBalance = useMemo(
+    () => accountBalances.reduce((sum, a) => sum + Number(a.balance || 0), 0),
+    [accountBalances],
+  );
+
+  // Saldo projetado cumulativo (mesma lógica da Dashboard).
+  const projected = useMemo(
+    () =>
+      computeProjectedCash({
+        totalBankBalance,
+        cumulativePendingTxs,
+        cards: cardsForCycle,
+        cardTransactions: cardTxsForCycle,
+        monthEnd,
+      }),
+    [totalBankBalance, cumulativePendingTxs, cardsForCycle, cardTxsForCycle, monthEnd],
+  );
 
   const plannedStats = useMemo(() => {
     const expenses = plannedItems.filter((p) => p.kind === "expense");
@@ -617,13 +688,13 @@ const TransactionsPage = () => {
       return;
     }
 
-    // Recorrência recém-criada: gera instâncias futuras imediatamente sem
-    // esperar o cooldown do hook. Limpa também a chave de cooldown pra
-    // não atrasar a próxima rodada.
+    // Recorrência recém-criada: gera instâncias futuras imediatamente até
+    // o fim do mês visualizado e invalida o cache do hook on-demand pra
+    // que próximas navegações regenerem se preciso.
     if (!editing && parsed.data.type !== "transfer" && parsed.data.isRecurring && family?.id && user?.id) {
       try {
-        await generateRecurrencesForFamily(family.id, user.id);
-        localStorage.removeItem(`finance-family-recurrences-last-run-${family.id}`);
+        await generateRecurrencesForFamily(family.id, user.id, toISODate(monthEnd));
+        invalidateRecurrenceHorizon(family.id, user.id);
       } catch {
         /* swallow */
       }
@@ -947,7 +1018,18 @@ const TransactionsPage = () => {
       <div className="flex flex-col gap-4 md:flex-row">
         <Card className="flex-1 rounded-lg border-border bg-card"><CardContent className="flex items-center gap-3 p-4"><span className="rounded-full bg-success/20 p-2 text-success"><ArrowUp className="h-4 w-4" /></span><div><p className="text-xs uppercase tracking-[0.5px] text-muted-foreground">Receitas</p><p className="text-lg font-semibold tabular-nums text-success">{ptCurrency.format(totals.income)}</p></div></CardContent></Card>
         <Card className="flex-1 rounded-lg border-border bg-card"><CardContent className="flex items-center gap-3 p-4"><span className="rounded-full bg-destructive/20 p-2 text-destructive"><ArrowDown className="h-4 w-4" /></span><div><p className="text-xs uppercase tracking-[0.5px] text-muted-foreground">Despesas</p><p className="text-lg font-semibold tabular-nums text-destructive">{ptCurrency.format(totals.expense)}</p></div></CardContent></Card>
-        <Card className="flex-1 rounded-lg border-border bg-card"><CardContent className="p-4"><p className="text-xs uppercase tracking-[0.5px] text-muted-foreground">Saldo</p><p className={cn("text-lg font-semibold tabular-nums", totals.balance >= 0 ? "text-success" : "text-destructive")}>{ptCurrency.format(totals.balance)}</p></CardContent></Card>
+        <Card className="flex-1 rounded-lg border-border bg-card"><CardContent className="p-4"><p className="text-xs uppercase tracking-[0.5px] text-muted-foreground">Saldo do mês</p><p className={cn("text-lg font-semibold tabular-nums", totals.balance >= 0 ? "text-success" : "text-destructive")}>{ptCurrency.format(totals.balance)}</p></CardContent></Card>
+        <Card className="flex-1 rounded-lg border-border bg-card">
+          <CardContent className="p-4">
+            <p className="text-xs uppercase tracking-[0.5px] text-primary">Saldo Projetado</p>
+            <p className={cn("text-lg font-semibold tabular-nums", projected.projected >= 0 ? "text-foreground" : "text-destructive")}>
+              {ptCurrency.format(projected.projected)}
+            </p>
+            <p className={cn("text-[11px] tabular-nums", projected.delta >= 0 ? "text-success" : "text-destructive")}>
+              {projected.delta >= 0 ? "+" : ""}{ptCurrency.format(projected.delta)} previstos
+            </p>
+          </CardContent>
+        </Card>
       </div>
 
       <Card className="rounded-xl border-border bg-card">

@@ -32,8 +32,11 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useFamily } from "@/contexts/FamilyContext";
 import { useUpcomingDueDates } from "@/hooks/useUpcomingDueDates";
+import { useEnsureRecurrencesUpTo } from "@/hooks/useEnsureRecurrencesUpTo";
 import { supabase } from "@/integrations/supabase/client";
+import { getInvoiceCycleForMonth, getOpenInvoiceWindow } from "@/lib/cardCycle";
 import { useChartColors } from "@/lib/chartColors";
+import { computeProjectedCash } from "@/lib/projectedCash";
 import { cn } from "@/lib/utils";
 
 type TransactionRow = {
@@ -115,41 +118,6 @@ const formatCompactBRL = (value: number) => {
   return ptCurrency.format(value);
 };
 
-// Returns the invoice cycle whose due date falls in the given month/year.
-// Used to project the invoice payment as a single cash-flow event at the
-// due date instead of N tiny entries on each purchase day.
-const getInvoiceCycleForMonth = (closingDay: number, dueDay: number, year: number, month: number) => {
-  const clampDay = (y: number, m: number, d: number) => {
-    const last = new Date(y, m + 1, 0).getDate();
-    return new Date(y, m, Math.min(d, last));
-  };
-  const dueDate = clampDay(year, month, dueDay);
-  const closingOffset = dueDay >= closingDay ? 0 : -1;
-  const closingDate = clampDay(year, month + closingOffset, closingDay);
-  const prevClosing = clampDay(year, month + closingOffset - 1, closingDay);
-  const cycleStart = new Date(prevClosing);
-  cycleStart.setDate(cycleStart.getDate() + 1);
-  return { dueDate, cycleStart, cycleEnd: closingDate };
-};
-
-// Computes the open invoice cycle of a card based on closing/due day.
-const getOpenInvoiceWindow = (closingDay: number, dueDay: number, today = new Date()) => {
-  const year = today.getFullYear();
-  const month = today.getMonth();
-  const day = today.getDate();
-  const clampDay = (y: number, m: number, d: number) => {
-    const lastDay = new Date(y, m + 1, 0).getDate();
-    return new Date(y, m, Math.min(d, lastDay));
-  };
-  const nextClosing = day > closingDay ? clampDay(year, month + 1, closingDay) : clampDay(year, month, closingDay);
-  const prevClosing = clampDay(nextClosing.getFullYear(), nextClosing.getMonth() - 1, closingDay);
-  const invoiceStart = new Date(prevClosing);
-  invoiceStart.setDate(invoiceStart.getDate() + 1);
-  const dueOffset = dueDay >= closingDay ? 0 : 1;
-  const dueDate = clampDay(nextClosing.getFullYear(), nextClosing.getMonth() + dueOffset, dueDay);
-  return { invoiceStart, invoiceEnd: nextClosing, dueDate };
-};
-
 const formatShortDate = (date: Date) => date.toLocaleDateString("pt-BR", { day: "2-digit", month: "short" }).replace(".", "");
 const daysBetween = (a: Date, b: Date) => Math.ceil((b.getTime() - a.getTime()) / 86400000);
 
@@ -214,6 +182,12 @@ const DashboardPage = () => {
   const weekStart = useMemo(() => startOfWeekMonday(new Date()), []);
   const weekEnd = useMemo(() => endOfWeekSunday(new Date()), []);
 
+  // Garante que recorrências estejam materializadas até o mês visualizado.
+  // Quando o usuário navega pra meses distantes, o hook estende o horizonte
+  // de geração — version muda quando novas linhas são inseridas, triggando
+  // reload do loadDashboard.
+  const { version: recurrenceVersion } = useEnsureRecurrencesUpTo(monthEnd);
+
   useEffect(() => {
     if (!family?.id) {
       setLoading(false);
@@ -273,18 +247,24 @@ const DashboardPage = () => {
           .eq("type", "expense")
           .neq("status", "paid")
           .not("card_id", "is", null),
-        // Todas as despesas no cartão num range amplo (-60d a +90d) para
-        // calcular ciclos de fatura abertos / próximos. Inclui categoria
-        // para o donut "A Pagar" agrupar por categoria mesmo quando a
-        // fatura é o que vai pesar no mês.
+        // Todas as despesas no cartão num range que cobre o mês visualizado.
+        // Range dinâmico: min(today-60d, monthStart-60d) a max(today+90d,
+        // monthEnd+30d) — garante que faturas de meses muito futuros
+        // capturem assinaturas/recorrentes de cartão já geradas.
         supabase
           .from("transactions")
           .select("card_id, amount, date, status, category_id, categories(id, name, color, icon)")
           .eq("family_id", family.id)
           .eq("type", "expense")
           .not("card_id", "is", null)
-          .gte("date", toISODate(new Date(Date.now() - 60 * 86400000)))
-          .lte("date", toISODate(new Date(Date.now() + 90 * 86400000))),
+          .gte("date", toISODate(new Date(Math.min(
+            Date.now() - 60 * 86400000,
+            monthStart.getTime() - 60 * 86400000,
+          ))))
+          .lte("date", toISODate(new Date(Math.max(
+            Date.now() + 90 * 86400000,
+            monthEnd.getTime() + 30 * 86400000,
+          )))),
         // Pendências cumulativas (não-cartão) entre hoje e o fim do mês visualizado.
         // Usado pra Caixa Projetado acumular meses futuros corretamente.
         supabase
@@ -310,7 +290,7 @@ const DashboardPage = () => {
     };
 
     void loadDashboard();
-  }, [family?.id, monthEnd, monthStart, prevMonthEnd, prevMonthStart, weekEnd, weekStart]);
+  }, [family?.id, monthEnd, monthStart, prevMonthEnd, prevMonthStart, weekEnd, weekStart, recurrenceVersion]);
 
   // Transações de cartão cuja fatura VENCE no mês visualizado, separadas
   // por status. Usadas para popular o donut "A Pagar" (pending) e "Pago"
@@ -385,46 +365,19 @@ const DashboardPage = () => {
   // saldo projetado acumula os meses intermediários (ex: maio +500 + junho +300 = 800
   // de variação sobre o saldo atual). Pra meses passados, a janela fica vazia e a
   // projeção iguala o saldo atual.
-  const projectedCash = useMemo(() => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    if (monthEnd < today) return totalBankBalance;
-
-    const pendingIncome = cumulativePendingTxs
-      .filter((tx) => tx.type === "income")
-      .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
-    const pendingExpense = cumulativePendingTxs
-      .filter((tx) => tx.type === "expense")
-      .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
-
-    // Faturas de cartão cujo vencimento cai entre hoje e o fim do mês visualizado.
-    // Iteramos cada cartão por cada mês na janela e somamos o que ainda está unpaid.
-    let cardInvoiceTotal = 0;
-    const startMonth = new Date(today.getFullYear(), today.getMonth(), 1);
-    const endMonth = new Date(monthEnd.getFullYear(), monthEnd.getMonth(), 1);
-    cards.forEach((card) => {
-      const closingDay = Number(card.closing_day || 0);
-      const dueDay = Number(card.due_day || 0);
-      if (!closingDay || !dueDay) return;
-      const cursor = new Date(startMonth);
-      while (cursor <= endMonth) {
-        const cycle = getInvoiceCycleForMonth(closingDay, dueDay, cursor.getFullYear(), cursor.getMonth());
-        if (cycle.dueDate >= today && cycle.dueDate <= monthEnd) {
-          const cycleStartIso = toISODate(cycle.cycleStart);
-          const cycleEndIso = toISODate(cycle.cycleEnd);
-          const unpaid = cardTransactions
-            .filter((tx) => tx.card_id === card.id && tx.date >= cycleStartIso && tx.date <= cycleEndIso && tx.status !== "paid")
-            .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
-          cardInvoiceTotal += unpaid;
-        }
-        cursor.setMonth(cursor.getMonth() + 1);
-      }
-    });
-
-    return totalBankBalance + pendingIncome - pendingExpense - cardInvoiceTotal;
-  }, [cumulativePendingTxs, cards, cardTransactions, monthEnd, totalBankBalance]);
-
-  const projectedDelta = projectedCash - totalBankBalance;
+  const projectedResult = useMemo(
+    () =>
+      computeProjectedCash({
+        totalBankBalance,
+        cumulativePendingTxs,
+        cards,
+        cardTransactions,
+        monthEnd,
+      }),
+    [cumulativePendingTxs, cards, cardTransactions, monthEnd, totalBankBalance],
+  );
+  const projectedCash = projectedResult.projected;
+  const projectedDelta = projectedResult.delta;
 
   const quickSummary = useMemo(() => {
     const pendingInMonth = scheduledMonth.filter((item) => !item.is_paid);
