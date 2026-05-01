@@ -13,6 +13,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { toast } from "@/components/ui/sonner";
 import { useFamily } from "@/contexts/FamilyContext";
 import { supabase } from "@/integrations/supabase/client";
+import { computeSpentByCard, type CardSpentResult } from "@/lib/cardSpent";
 import { cn } from "@/lib/utils";
 
 type CardBrand = "visa" | "mastercard" | "elo" | "amex" | "hipercard" | "outro";
@@ -123,6 +124,7 @@ const CardInvoiceDetailPage = () => {
   const [categories, setCategories] = useState<CategoryRow[]>([]);
   const [transactions, setTransactions] = useState<TransactionRow[]>([]);
   const [history, setHistory] = useState<{ month: Date; total: number; status: "paid" | "open" }[]>([]);
+  const [cardSpent, setCardSpent] = useState<CardSpentResult | null>(null);
 
   const [editOpen, setEditOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -242,6 +244,29 @@ const CardInvoiceDetailPage = () => {
           return { month: window.month, total, status: statusValue };
         }),
       );
+    }
+
+    // Limite utilizado do cartão usando a mesma lógica da Dashboard:
+    // ciclo aberto + parcelas/avulsas em ciclos futuros (recorrentes
+    // futuras não inflam — só a próxima ocorrência conta).
+    const spentTxsRes = await supabase
+      .from("transactions")
+      .select("card_id, amount, status, date, is_recurring, recurrence_parent_id")
+      .eq("family_id", family.id)
+      .eq("card_id", currentCard.id)
+      .eq("type", "expense")
+      .neq("status", "paid");
+    if (!spentTxsRes.error) {
+      const map = computeSpentByCard(
+        [{
+          id: currentCard.id,
+          credit_limit: currentCard.credit_limit,
+          closing_day: currentCard.closing_day,
+          due_day: currentCard.due_day,
+        }],
+        ((spentTxsRes.data as Array<{ card_id: string | null; amount: number; status: string | null; date: string; is_recurring: boolean | null; recurrence_parent_id: string | null }> | null) ?? []),
+      );
+      setCardSpent(map.get(currentCard.id) ?? null);
     }
 
     setLoading(false);
@@ -465,6 +490,40 @@ const CardInvoiceDetailPage = () => {
             <p className="text-xs font-semibold tracking-wide text-muted-foreground">STATUS</p>
             <p className={cn("mt-2 text-3xl font-bold", invoiceStatus.className)}>{invoiceStatus.label}</p>
           </div>
+          {cardSpent && cardSpent.limit > 0 && (
+            <div className="min-w-[220px] flex-1 rounded-xl border p-5" style={{ backgroundColor: "#12121a", borderColor: "#1e1e2e" }}>
+              <p className="text-xs font-semibold tracking-wide text-muted-foreground">LIMITE</p>
+              <p className="mt-2 text-2xl font-bold tabular-nums text-foreground">
+                {ptCurrency.format(cardSpent.spent)}
+              </p>
+              <p className="text-[11px] text-muted-foreground">
+                de {ptCurrency.format(cardSpent.limit)} · disp. <span className={cn("font-semibold", cardSpent.available > 0 ? "text-success" : "text-destructive")}>{ptCurrency.format(cardSpent.available)}</span>
+              </p>
+              <div className="mt-2 h-1.5 w-full rounded-full bg-secondary">
+                <div
+                  className={cn("h-1.5 rounded-full", cardSpent.ratio >= 80 ? "bg-destructive" : cardSpent.ratio >= 50 ? "bg-warning" : "bg-success")}
+                  style={{ width: `${cardSpent.ratio}%` }}
+                />
+              </div>
+              <div className="mt-2 flex flex-wrap gap-1.5 text-[10px] text-muted-foreground">
+                {cardSpent.currentCycle > 0 && (
+                  <span className="inline-flex items-center gap-1 rounded-md bg-secondary/60 px-1.5 py-0.5">
+                    Aberta: <span className="font-semibold text-foreground tabular-nums">{ptCurrency.format(cardSpent.currentCycle)}</span>
+                  </span>
+                )}
+                {cardSpent.futureCycles > 0 && (
+                  <span className="inline-flex items-center gap-1 rounded-md bg-info/15 px-1.5 py-0.5 text-info">
+                    Próximas: <span className="font-semibold tabular-nums">{ptCurrency.format(cardSpent.futureCycles)}</span>
+                  </span>
+                )}
+                {cardSpent.overdue > 0 && (
+                  <span className="inline-flex items-center gap-1 rounded-md bg-warning/15 px-1.5 py-0.5 text-warning">
+                    Atraso: <span className="font-semibold tabular-nums">{ptCurrency.format(cardSpent.overdue)}</span>
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="rounded-xl border border-border bg-card p-4">
