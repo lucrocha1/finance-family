@@ -166,7 +166,7 @@ const DashboardPage = () => {
   const [previousTransactions, setPreviousTransactions] = useState<TransactionRow[]>([]);
   const [accounts, setAccounts] = useState<AccountRow[]>([]);
   const [cards, setCards] = useState<CardRow[]>([]);
-  type CardCommitmentRow = Pick<TransactionRow, "card_id" | "amount" | "type" | "status" | "date" | "is_recurring"> & {
+  type CardCommitmentRow = Pick<TransactionRow, "card_id" | "amount" | "type" | "status" | "date" | "is_recurring" | "is_installment"> & {
     recurrence_parent_id: string | null;
   };
   const [cardCommitments, setCardCommitments] = useState<CardCommitmentRow[]>([]);
@@ -257,7 +257,7 @@ const DashboardPage = () => {
         // de recorrentes (só a próxima ocorrência conta).
         supabase
           .from("transactions")
-          .select("card_id, amount, type, status, date, is_recurring, recurrence_parent_id")
+          .select("card_id, amount, type, status, date, is_recurring, recurrence_parent_id, is_installment")
           .eq("family_id", family.id)
           .eq("type", "expense")
           .neq("status", "paid")

@@ -254,7 +254,7 @@ const CardInvoiceDetailPage = () => {
     // futuras não inflam — só a próxima ocorrência conta).
     const spentTxsRes = await supabase
       .from("transactions")
-      .select("card_id, amount, status, date, is_recurring, recurrence_parent_id")
+      .select("card_id, amount, status, date, is_recurring, recurrence_parent_id, is_installment")
       .eq("family_id", family.id)
       .eq("card_id", currentCard.id)
       .eq("type", "expense")
@@ -272,7 +272,7 @@ const CardInvoiceDetailPage = () => {
           closing_day: currentCard.closing_day,
           due_day: currentCard.due_day,
         }],
-        ((spentTxsRes.data as Array<{ card_id: string | null; amount: number; status: string | null; date: string; is_recurring: boolean | null; recurrence_parent_id: string | null }> | null) ?? []),
+        ((spentTxsRes.data as Array<{ card_id: string | null; amount: number; status: string | null; date: string; is_recurring: boolean | null; recurrence_parent_id: string | null; is_installment: boolean | null }> | null) ?? []),
         virtualToday,
       );
       setCardSpent(map.get(currentCard.id) ?? null);
