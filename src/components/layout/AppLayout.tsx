@@ -167,7 +167,10 @@ export const AppLayout = () => {
         )}
         style={{ width: isMobile ? "260px" : desktopSidebarWidth }}
       >
-        <div className="relative flex h-16 items-center border-b border-sidebar-border bg-[hsl(var(--sidebar-header-bg))] px-4">
+        <div
+          className="relative flex items-center border-b border-sidebar-border bg-[hsl(var(--sidebar-header-bg))] px-4"
+          style={{ paddingTop: "env(safe-area-inset-top)", height: "calc(4rem + env(safe-area-inset-top))" }}
+        >
           <div className={cn("flex items-center", isCollapsed ? "justify-center" : "gap-2.5")}>
             <img src={sidebarLogo} alt="Finance Family" className="h-9 w-9 rounded-md object-cover" />
             {!isCollapsed && <span className="text-lg font-bold text-primary">Finance Family</span>}
@@ -203,24 +206,27 @@ export const AppLayout = () => {
       </aside>
 
       <div className="transition-all duration-300" style={{ marginLeft: isMobile ? "0px" : desktopSidebarWidth }}>
-        <header className="sticky top-0 z-20 flex h-16 items-center justify-between border-b border-border/40 bg-transparent px-6 backdrop-blur-sm">
-          <div className="flex items-center gap-3">
+        <header
+          className="sticky top-0 z-20 flex h-16 items-center justify-between border-b border-border/40 bg-background/80 px-3 backdrop-blur-md sm:px-6"
+          style={{ paddingTop: "env(safe-area-inset-top)", height: "calc(4rem + env(safe-area-inset-top))" }}
+        >
+          <div className="flex min-w-0 items-center gap-2 sm:gap-3">
             {isMobile && (
               <Button
                 type="button"
                 variant="ghost"
                 size="icon"
-                className="h-9 w-9 text-muted-foreground hover:bg-secondary"
+                className="h-10 w-10 shrink-0 text-muted-foreground hover:bg-secondary"
                 onClick={() => setMobileOpen(true)}
                 aria-label="Abrir menu"
               >
                 <Menu className="h-5 w-5" />
               </Button>
             )}
-            <h1 className="text-xl font-bold text-foreground">{pageTitle}</h1>
+            <h1 className="truncate text-lg font-bold text-foreground sm:text-xl">{pageTitle}</h1>
           </div>
 
-          <div className="flex items-center gap-4">
+          <div className="flex shrink-0 items-center gap-3 sm:gap-4">
             <button
               type="button"
               onClick={toggleTheme}
@@ -306,7 +312,10 @@ export const AppLayout = () => {
           </div>
         </header>
 
-        <main className="h-[calc(100vh-4rem)] overflow-y-auto px-6 py-6">
+        <main
+          className="overflow-y-auto px-4 py-6 sm:px-6"
+          style={{ height: "calc(100vh - 4rem - env(safe-area-inset-top))" }}
+        >
           <div className="mx-auto w-full max-w-[1400px]">
             <Outlet />
           </div>
