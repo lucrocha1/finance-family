@@ -282,10 +282,18 @@ const GoalsPage = () => {
   }, [budgetByCategory, categories, monthExpenses]);
 
   const budgetSummary = useMemo(() => {
-    const totalBudget = budgets.reduce((sum, row) => sum + Number(row.amount || 0), 0);
-    const available = totalBudget - monthExpenseTotal;
-    return { totalBudget, totalSpent: monthExpenseTotal, available };
-  }, [budgets, monthExpenseTotal]);
+    // Total orçado = soma dos sticky budgets vigentes no mês visualizado
+    // (não dos registros do DB inteiros). Total gasto = soma das despesas
+    // SÓ nas categorias com budget definido, pra Disponível ser
+    // comparável (mesmo escopo dos dois lados).
+    let totalBudget = 0;
+    let totalSpent = 0;
+    budgetByCategory.forEach((b, categoryId) => {
+      totalBudget += Number(b.amount || 0);
+      totalSpent += monthExpenses.get(categoryId) ?? 0;
+    });
+    return { totalBudget, totalSpent, available: totalBudget - totalSpent };
+  }, [budgetByCategory, monthExpenses]);
 
   const budgetChartData = useMemo(() => {
     return budgetCards
