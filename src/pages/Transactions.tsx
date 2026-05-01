@@ -36,6 +36,7 @@ import { useFamily } from "@/contexts/FamilyContext";
 import { supabase } from "@/integrations/supabase/client";
 import { buildCSV, downloadCSV } from "@/lib/csvExport";
 import { ensureFamily } from "@/lib/familyGuard";
+import { generateRecurrencesForFamily } from "@/lib/generateRecurrences";
 import { priorityLabel, type PlannedItemRow } from "@/lib/plannedItems";
 import { PlannedItemDialog } from "@/components/PlannedItemDialog";
 import { SchedulePlannedDialog } from "@/components/SchedulePlannedDialog";
@@ -474,7 +475,7 @@ const TransactionsPage = () => {
       is_recurring: parsed.data.type !== "transfer" ? parsed.data.isRecurring : false,
       recurrence_type: parsed.data.type !== "transfer" && parsed.data.isRecurring ? parsed.data.recurrenceType : null,
       recurrence_day: parsed.data.type !== "transfer" && parsed.data.isRecurring && parsed.data.recurrenceType === "monthly"
-        ? new Date(parsed.data.date).getDate()
+        ? Number(parsed.data.date.slice(8, 10))
         : null,
       is_installment: parsed.data.type === "expense" ? parsed.data.isInstallment : false,
     };
@@ -599,6 +600,18 @@ const TransactionsPage = () => {
       setFormError("Não foi possível salvar a transação");
       setSaving(false);
       return;
+    }
+
+    // Recorrência recém-criada: gera instâncias futuras imediatamente sem
+    // esperar o cooldown do hook. Limpa também a chave de cooldown pra
+    // não atrasar a próxima rodada.
+    if (!editing && parsed.data.type !== "transfer" && parsed.data.isRecurring && family?.id && user?.id) {
+      try {
+        await generateRecurrencesForFamily(family.id, user.id);
+        localStorage.removeItem(`finance-family-recurrences-last-run-${family.id}`);
+      } catch {
+        /* swallow */
+      }
     }
 
     await loadData();
