@@ -35,7 +35,7 @@ import { useUpcomingDueDates } from "@/hooks/useUpcomingDueDates";
 import { useEnsureRecurrencesUpTo } from "@/hooks/useEnsureRecurrencesUpTo";
 import { supabase } from "@/integrations/supabase/client";
 import { getInvoiceCycleForMonth, getOpenInvoiceWindow } from "@/lib/cardCycle";
-import { computeSpentByCard } from "@/lib/cardSpent";
+import { computeSpentByCard, isCommittedCardTx } from "@/lib/cardSpent";
 import { useChartColors } from "@/lib/chartColors";
 import { computeProjectedCash, type DebtForProjection } from "@/lib/projectedCash";
 import { cn } from "@/lib/utils";
@@ -170,7 +170,10 @@ const DashboardPage = () => {
     recurrence_parent_id: string | null;
   };
   const [cardCommitments, setCardCommitments] = useState<CardCommitmentRow[]>([]);
-  const [cardTransactions, setCardTransactions] = useState<Pick<TransactionRow, "card_id" | "amount" | "date" | "status" | "category_id" | "categories">[]>([]);
+  type CardTxRow = Pick<TransactionRow, "card_id" | "amount" | "date" | "status" | "category_id" | "categories" | "is_installment" | "is_recurring"> & {
+    recurrence_parent_id: string | null;
+  };
+  const [cardTransactions, setCardTransactions] = useState<CardTxRow[]>([]);
   const [cumulativePendingTxs, setCumulativePendingTxs] = useState<Pick<TransactionRow, "id" | "card_id" | "amount" | "type" | "status" | "date">[]>([]);
   // Dívidas ativas com due_date em [min(monthStart, hoje), monthEnd]. Usadas
   // tanto pra projeção cumulativa (Caixa Projetado) quanto pro Fluxo do
@@ -268,7 +271,7 @@ const DashboardPage = () => {
         // capturem assinaturas/recorrentes de cartão já geradas.
         supabase
           .from("transactions")
-          .select("card_id, amount, date, status, category_id, categories(id, name, color, icon)")
+          .select("card_id, amount, date, status, category_id, is_installment, is_recurring, recurrence_parent_id, categories(id, name, color, icon)")
           .eq("family_id", family.id)
           .eq("type", "expense")
           .not("card_id", "is", null)
@@ -309,7 +312,7 @@ const DashboardPage = () => {
       setAccounts((accountsRes.data as AccountRow[] | null) ?? []);
       setCards((cardsRes.data as CardRow[] | null) ?? []);
       setCardCommitments((cardCommitRes.data as CardCommitmentRow[] | null) ?? []);
-      setCardTransactions((cardTxRes.data as Pick<TransactionRow, "card_id" | "amount" | "date" | "status" | "category_id" | "categories">[] | null) ?? []);
+      setCardTransactions((cardTxRes.data as CardTxRow[] | null) ?? []);
       setCumulativePendingTxs((cumulativePendingRes.data as Pick<TransactionRow, "id" | "card_id" | "amount" | "type" | "status" | "date">[] | null) ?? []);
       setActiveDebts((activeDebtsRes.data as (DebtForProjection & { due_date: string })[] | null) ?? []);
       setScheduledMonth((schedMonthRes.data as ScheduledPaymentRow[] | null) ?? []);
@@ -326,6 +329,7 @@ const DashboardPage = () => {
   // totals/donutData porque eles dependem disso.
   const cardTxsDueInMonth = useMemo(() => {
     const result: Array<typeof cardTransactions[number]> = [];
+    const today = new Date();
     cards.forEach((card) => {
       const closingDay = Number(card.closing_day || 0);
       const dueDay = Number(card.due_day || 0);
@@ -334,7 +338,7 @@ const DashboardPage = () => {
       const cycleStartIso = toISODate(cycle.cycleStart);
       const cycleEndIso = toISODate(cycle.cycleEnd);
       cardTransactions
-        .filter((tx) => tx.card_id === card.id && tx.date >= cycleStartIso && tx.date <= cycleEndIso)
+        .filter((tx) => tx.card_id === card.id && tx.date >= cycleStartIso && tx.date <= cycleEndIso && isCommittedCardTx(tx, today))
         .forEach((tx) => result.push(tx));
     });
     return result;
@@ -407,6 +411,7 @@ const DashboardPage = () => {
   // está em transactions e é contado normalmente).
   const cardInvoiceProjections = useMemo(() => {
     const events: Array<{ dueDate: Date; amount: number; cardId: string }> = [];
+    const today = new Date();
     cards.forEach((card) => {
       const closingDay = Number(card.closing_day || 0);
       const dueDay = Number(card.due_day || 0);
@@ -415,7 +420,7 @@ const DashboardPage = () => {
       const cycleStartIso = toISODate(cycle.cycleStart);
       const cycleEndIso = toISODate(cycle.cycleEnd);
       const unpaid = cardTransactions
-        .filter((tx) => tx.card_id === card.id && tx.date >= cycleStartIso && tx.date <= cycleEndIso && tx.status !== "paid")
+        .filter((tx) => tx.card_id === card.id && tx.date >= cycleStartIso && tx.date <= cycleEndIso && tx.status !== "paid" && isCommittedCardTx(tx, today))
         .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
       if (unpaid > 0) {
         events.push({ dueDate: cycle.dueDate, amount: unpaid, cardId: card.id });
@@ -505,8 +510,10 @@ const DashboardPage = () => {
         const window = getOpenInvoiceWindow(Number(card.closing_day), Number(card.due_day), today);
         const startIso = toISODate(window.invoiceStart);
         const endIso = toISODate(window.invoiceEnd);
+        // Filtra compras agendadas (single futuras): só entram quando
+        // o dia chegar. Mesma regra de computeSpentByCard.
         const total = cardTransactions
-          .filter((tx) => tx.card_id === card.id && tx.date >= startIso && tx.date <= endIso)
+          .filter((tx) => tx.card_id === card.id && tx.date >= startIso && tx.date <= endIso && isCommittedCardTx(tx, today))
           .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
         const daysToClose = daysBetween(today, window.invoiceEnd);
         const daysToDue = daysBetween(today, window.dueDate);

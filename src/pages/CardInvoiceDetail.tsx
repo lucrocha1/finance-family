@@ -13,7 +13,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { toast } from "@/components/ui/sonner";
 import { useFamily } from "@/contexts/FamilyContext";
 import { supabase } from "@/integrations/supabase/client";
-import { computeSpentByCard, type CardSpentResult } from "@/lib/cardSpent";
+import { computeSpentByCard, isCommittedCardTx, type CardSpentResult } from "@/lib/cardSpent";
 import { cn } from "@/lib/utils";
 
 type CardBrand = "visa" | "mastercard" | "elo" | "amex" | "hipercard" | "outro";
@@ -40,6 +40,9 @@ type TransactionRow = {
   type: string;
   category_id: string | null;
   notes: string | null;
+  is_installment: boolean | null;
+  is_recurring: boolean | null;
+  recurrence_parent_id: string | null;
   categories?: { id?: string; name?: string; color?: string | null } | { id?: string; name?: string; color?: string | null }[] | null;
 };
 
@@ -200,7 +203,7 @@ const CardInvoiceDetailPage = () => {
     const cycle = getCycleWindow(Number(currentCard.closing_day || 1), invoiceMonth);
     const txRes = await supabase
       .from("transactions")
-      .select("id, description, amount, date, status, type, category_id, notes, categories(id, name, color)")
+      .select("id, description, amount, date, status, type, category_id, notes, is_installment, is_recurring, recurrence_parent_id, categories(id, name, color)")
       .eq("family_id", family.id)
       .eq("card_id", currentCard.id)
       .eq("type", "expense")
@@ -214,7 +217,12 @@ const CardInvoiceDetailPage = () => {
       return;
     }
 
-    setTransactions((txRes.data as TransactionRow[] | null) ?? []);
+    // Filtra compras agendadas (single futuras): só entram na fatura
+    // quando o dia chegar. Mesma regra usada em computeSpentByCard pra
+    // garantir consistência LIMITE × FATURA.
+    const realToday = new Date();
+    const txData = (txRes.data as TransactionRow[] | null) ?? [];
+    setTransactions(txData.filter((tx) => isCommittedCardTx(tx, realToday)));
 
     // Histórico: 6 meses passados + mês atual + 6 meses futuros, pra
     // que parcelas e recorrentes em ciclos futuros fiquem visíveis (esse
@@ -230,7 +238,7 @@ const CardInvoiceDetailPage = () => {
 
     const historyRes = await supabase
       .from("transactions")
-      .select("amount, date, status")
+      .select("amount, date, status, is_installment, is_recurring, recurrence_parent_id")
       .eq("family_id", family.id)
       .eq("card_id", currentCard.id)
       .eq("type", "expense")
@@ -238,10 +246,20 @@ const CardInvoiceDetailPage = () => {
       .lte("date", maxEnd);
 
     if (!historyRes.error) {
-      const rows = (historyRes.data as { amount: number; date: string; status: string | null }[] | null) ?? [];
+      const rows = (historyRes.data as Array<{
+        amount: number;
+        date: string;
+        status: string | null;
+        is_installment: boolean | null;
+        is_recurring: boolean | null;
+        recurrence_parent_id: string | null;
+      }> | null) ?? [];
+      const realToday = new Date();
+      // Filtra compras agendadas pra cada janela (mesma regra da fatura).
+      const committedRows = rows.filter((row) => isCommittedCardTx(row, realToday));
       setHistory(
         windows.map((window) => {
-          const monthRows = rows.filter((row) => row.date >= window.start && row.date <= window.end);
+          const monthRows = committedRows.filter((row) => row.date >= window.start && row.date <= window.end);
           const total = monthRows.reduce((sum, row) => sum + Number(row.amount || 0), 0);
           const statusValue: "paid" | "open" = monthRows.length > 0 && monthRows.every((row) => row.status === "paid") ? "paid" : "open";
           return { month: window.month, total, status: statusValue };
