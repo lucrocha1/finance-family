@@ -10,6 +10,14 @@ import { generateRecurrencesForFamily } from "@/lib/generateRecurrences";
 // o horizonte é estendido e o gerador roda de novo.
 const horizonCache = new Map<string, string>();
 
+// Cache de promises em voo: previne RACE CONDITION quando o useEffect
+// dispara 2× em paralelo (React StrictMode em dev, ou usuário abre
+// múltiplas abas, ou navegação rápida entre meses). Sem isso, ambas as
+// chamadas viam cache vazio e disparavam o gerador ao mesmo tempo,
+// computando max(date) idêntico e inserindo as MESMAS filhas duas vezes
+// — causando duplicação de recorrentes.
+const inFlightCache = new Map<string, Promise<{ created: number }>>();
+
 const toIso = (d: Date) => {
   const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
   return local.toISOString().slice(0, 10);
@@ -38,7 +46,17 @@ export const useEnsureRecurrencesUpTo = (targetDate: Date | null | undefined) =>
 
     let cancelled = false;
     setGenerating(true);
-    void generateRecurrencesForFamily(family.id, user.id, targetIso)
+
+    // Dedup: se já existe uma chamada em voo pro mesmo (family, user) E
+    // pra um horizonte >= targetIso, reutilizamos. Senão, dispara nova.
+    const inFlightKey = `${cacheKey}:${targetIso}`;
+    let promise = inFlightCache.get(inFlightKey);
+    if (!promise) {
+      promise = generateRecurrencesForFamily(family.id, user.id, targetIso);
+      inFlightCache.set(inFlightKey, promise);
+    }
+
+    void promise
       .then((res) => {
         if (cancelled) return;
         horizonCache.set(cacheKey, targetIso);
@@ -49,6 +67,7 @@ export const useEnsureRecurrencesUpTo = (targetDate: Date | null | undefined) =>
         horizonCache.delete(cacheKey);
       })
       .finally(() => {
+        inFlightCache.delete(inFlightKey);
         if (!cancelled) setGenerating(false);
       });
 
