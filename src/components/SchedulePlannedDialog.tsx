@@ -5,9 +5,11 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { toast } from "@/components/ui/sonner";
 import { useAuth } from "@/contexts/AuthContext";
 import { useFamily } from "@/contexts/FamilyContext";
+import { ensureFamily } from "@/lib/familyGuard";
 import { supabase } from "@/integrations/supabase/client";
 import { schedulePlannedInvestment, schedulePlannedTransaction, type PlannedItemRow } from "@/lib/plannedItems";
 
@@ -18,6 +20,8 @@ type Props = {
   onScheduled: () => void;
 };
 
+const toIsoDate = (d: Date) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+
 export const SchedulePlannedDialog = ({ open, item, onClose, onScheduled }: Props) => {
   const { family } = useFamily();
   const { user } = useAuth();
@@ -25,12 +29,16 @@ export const SchedulePlannedDialog = ({ open, item, onClose, onScheduled }: Prop
   const [date, setDate] = useState<string>("");
   const [accountId, setAccountId] = useState<string>("");
   const [accounts, setAccounts] = useState<Array<{ id: string; name: string }>>([]);
+  const [isInstallment, setIsInstallment] = useState(false);
+  const [installments, setInstallments] = useState(2);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (!open || !item) return;
     setDate(item.target_date ?? new Date().toISOString().slice(0, 10));
     setAccountId(item.account_id ?? "");
+    setIsInstallment(false);
+    setInstallments(2);
   }, [item, open]);
 
   useEffect(() => {
@@ -52,22 +60,72 @@ export const SchedulePlannedDialog = ({ open, item, onClose, onScheduled }: Prop
 
   if (!item) return null;
 
+  const canInstallment = item.kind === "expense";
+  const installmentValue = isInstallment ? Number(item.amount || 0) / installments : Number(item.amount || 0);
+
   const submit = async () => {
     if (!date) {
       toast.error("Escolha uma data");
       return;
     }
     setSaving(true);
-    const result = item.kind === "investment"
-      ? await schedulePlannedInvestment(item, date, { familyId: family?.id, userId: user?.id })
-      : await schedulePlannedTransaction(item, date, { familyId: family?.id, userId: user?.id, accountIdOverride: accountId || null });
-    setSaving(false);
 
-    if (!result.ok) {
-      toast.error(result.message);
+    if (item.kind === "investment") {
+      const result = await schedulePlannedInvestment(item, date, { familyId: family?.id, userId: user?.id });
+      setSaving(false);
+      if (!result.ok) { toast.error(result.message); return; }
+      toast.success("Agendado!");
+      onScheduled();
+      onClose();
       return;
     }
-    toast.success("Agendado! Aparece como pendente nessa data.");
+
+    if (!isInstallment) {
+      const result = await schedulePlannedTransaction(item, date, { familyId: family?.id, userId: user?.id, accountIdOverride: accountId || null });
+      setSaving(false);
+      if (!result.ok) { toast.error(result.message); return; }
+      toast.success("Agendado! Aparece como pendente nessa data.");
+      onScheduled();
+      onClose();
+      return;
+    }
+
+    // Parcelar: cria N transações pending com mesmo installment_group_id,
+    // depois remove o planned_item.
+    const ctx = ensureFamily(family?.id, user?.id);
+    if (!ctx) { setSaving(false); toast.error("Família não carregada"); return; }
+    const totalCents = Math.round(Number(item.amount || 0) * 100);
+    const baseCents = Math.floor(totalCents / installments);
+    const remainder = totalCents % installments;
+    const groupId = crypto.randomUUID();
+    const rows = Array.from({ length: installments }, (_, index) => {
+      const due = new Date(`${date}T00:00:00`);
+      due.setMonth(due.getMonth() + index);
+      return {
+        family_id: ctx.familyId,
+        user_id: ctx.userId,
+        type: "expense",
+        description: `${item.description} (${index + 1}/${installments})`,
+        amount: (baseCents + (index < remainder ? 1 : 0)) / 100,
+        date: toIsoDate(due),
+        status: "pending",
+        category_id: item.category_id,
+        account_id: accountId || item.account_id || null,
+        notes: item.notes,
+        is_installment: true,
+        installment_group_id: groupId,
+        installment_current: index + 1,
+        installment_total: installments,
+      };
+    });
+
+    const { error: insErr } = await supabase.from("transactions").insert(rows);
+    if (insErr) { setSaving(false); toast.error(insErr.message); return; }
+    const { error: delErr } = await supabase.from("planned_items").delete().eq("id", item.id);
+    if (delErr) { setSaving(false); toast.error(delErr.message); return; }
+
+    setSaving(false);
+    toast.success(`Parcelado em ${installments}x e agendado!`);
     onScheduled();
     onClose();
   };
@@ -85,7 +143,7 @@ export const SchedulePlannedDialog = ({ open, item, onClose, onScheduled }: Prop
           </p>
 
           <div className="space-y-2">
-            <Label className="text-xs text-muted-foreground">Data</Label>
+            <Label className="text-xs text-muted-foreground">{isInstallment ? "Data da 1ª parcela" : "Data"}</Label>
             <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="h-[42px] rounded-lg border-border bg-secondary text-foreground" />
           </div>
 
@@ -103,6 +161,34 @@ export const SchedulePlannedDialog = ({ open, item, onClose, onScheduled }: Prop
                   ))}
                 </SelectContent>
               </Select>
+            </div>
+          )}
+
+          {canInstallment && (
+            <div className="space-y-3 rounded-lg border border-border bg-secondary/30 p-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <Label className="text-sm font-medium text-foreground">Parcelar</Label>
+                  <p className="text-xs text-muted-foreground">Divide em parcelas mensais começando na data acima</p>
+                </div>
+                <Switch checked={isInstallment} onCheckedChange={setIsInstallment} />
+              </div>
+              {isInstallment && (
+                <div className="space-y-2">
+                  <Label className="text-xs text-muted-foreground">Número de parcelas (2 a 48)</Label>
+                  <Input
+                    type="number"
+                    min={2}
+                    max={48}
+                    value={installments}
+                    onChange={(e) => setInstallments(Math.min(48, Math.max(2, Number(e.target.value) || 2)))}
+                    className="h-[42px] rounded-lg border-border bg-secondary text-foreground"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    {installments}× de {new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(installmentValue)}
+                  </p>
+                </div>
+              )}
             </div>
           )}
         </div>
