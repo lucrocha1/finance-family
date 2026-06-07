@@ -132,22 +132,57 @@ export const computeProjectedCash = (input: ProjectedCashInput): ProjectedCashRe
   }
 
   // Dívidas/empréstimos ativos com vencimento na janela.
-  // Para dívidas parceladas, o schema só guarda um único due_date (próxima
-  // parcela), então projetamos apenas installment_amount nessa janela. Para
-  // dívidas à vista, projetamos o restante (total - pago).
+  // Para dívidas parceladas, o schema só guarda o due_date da PRÓXIMA
+  // parcela. Projetamos forward mensalmente até cobrir toda a janela
+  // (cap=remaining pra não exceder o saldo devedor).
+  // Para dívidas à vista, projetamos o restante (total - pago) uma vez.
   let debtOutflow = 0;
   let debtInflow = 0;
   for (const debt of input.debts ?? []) {
     if (!debt.due_date) continue;
     if (debt.status && debt.status !== "active") continue;
-    if (debt.due_date < todayIso || debt.due_date > monthEndIso) continue;
     const total = Number(debt.total_with_interest ?? debt.original_amount ?? 0);
     const remaining = Math.max(0, total - Number(debt.amount_paid ?? 0));
     if (remaining <= 0) continue;
     const installment = Number(debt.installment_amount ?? 0);
-    const amount = debt.has_installments && installment > 0
-      ? Math.min(installment, remaining)
-      : remaining;
+    const hasInstallments = Boolean(debt.has_installments) && installment > 0;
+
+    let amount = 0;
+    if (hasInstallments) {
+      // Itera parcelas mensais a partir do due_date original. Soma cada
+      // parcela cuja data caia na janela [todayIso, monthEndIso], até
+      // esgotar o remaining. Bug que isso corrige: empréstimo de 12x
+      // R$ 500 só projetava 1 parcela (R$ 500) na janela de 6 meses,
+      // quando deveria projetar 6× R$ 500.
+      const [y, m, d] = debt.due_date.split("-").map(Number);
+      let cursorYear = y;
+      let cursorMonth = m - 1; // 0-indexed
+      let remainingBudget = remaining;
+      while (remainingBudget > 0) {
+        const lastDay = new Date(cursorYear, cursorMonth + 1, 0).getDate();
+        const day = Math.min(d, lastDay);
+        const dateStr = `${cursorYear}-${String(cursorMonth + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+        if (dateStr > monthEndIso) break;
+        if (dateStr >= todayIso) {
+          const slice = Math.min(installment, remainingBudget);
+          amount += slice;
+          remainingBudget -= slice;
+        } else {
+          // Parcela já passada (overdue) — não conta na janela futura
+          remainingBudget = Math.max(0, remainingBudget - installment);
+        }
+        // Avança um mês
+        cursorMonth += 1;
+        if (cursorMonth > 11) {
+          cursorMonth = 0;
+          cursorYear += 1;
+        }
+      }
+    } else {
+      if (debt.due_date < todayIso || debt.due_date > monthEndIso) continue;
+      amount = remaining;
+    }
+
     if (amount <= 0) continue;
     if (debt.direction === "they_owe") {
       debtInflow += amount;

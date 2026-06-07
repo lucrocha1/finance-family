@@ -624,9 +624,11 @@ const TransactionsPage = () => {
         }
       }
     } else if (parsed.data.type === "transfer") {
+      // Transfer cria 2 rows: 'out' debita origem, 'in' credita destino.
+      // O trigger de saldo inverte sinal baseado em transfer_direction.
       const payload = [
-        { ...base, type: "transfer", account_id: parsed.data.fromAccountId, user_id: ctx.userId, family_id: ctx.familyId },
-        { ...base, type: "transfer", account_id: parsed.data.toAccountId, user_id: ctx.userId, family_id: ctx.familyId },
+        { ...base, type: "transfer", account_id: parsed.data.fromAccountId, transfer_direction: "out", user_id: ctx.userId, family_id: ctx.familyId },
+        { ...base, type: "transfer", account_id: parsed.data.toAccountId, transfer_direction: "in", user_id: ctx.userId, family_id: ctx.familyId },
       ];
       const { error } = await supabase.from("transactions").insert(payload);
       if (error) errorMessage = error.message;
