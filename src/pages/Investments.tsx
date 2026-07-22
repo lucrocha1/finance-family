@@ -88,9 +88,9 @@ const formSchema = z
   .object({
     name: z.string().trim().min(2, "Nome obrigatório").max(120, "Máximo de 120 caracteres"),
     type: z.enum(["stocks", "crypto", "fixed_income", "fund", "savings", "real_estate", "other"]),
-    amountInvestedCents: z.number().int().min(1, "Valor investido obrigatório"),
-    currentValueCents: z.number().int().min(0, "Valor atual inválido"),
-    targetValueCents: z.number().int().min(0),
+    amountInvestedCents: z.number().int().min(1, "Valor investido obrigatório").max(1_000_000_000_000, "Valor muito alto"),
+    currentValueCents: z.number().int().min(0, "Valor atual inválido").max(1_000_000_000_000, "Valor muito alto"),
+    targetValueCents: z.number().int().min(0).max(1_000_000_000_000, "Valor muito alto"),
     targetDate: z.string().nullable(),
     institution: z.string().trim().max(100).optional(),
     notes: z.string().trim().max(500).optional(),
@@ -105,7 +105,15 @@ const toMoneyDigits = (value: number) => String(Math.round(value * 100));
 const toMoneyValue = (digits: string) => Number(digits || "0") / 100;
 const toISODate = (date: Date) => new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
 const formatDate = (iso: string | null) => (iso ? new Date(`${iso}T00:00:00`).toLocaleDateString("pt-BR") : "-");
-const formatPct = (value: number) => value.toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+// Arredonda à casa exibida e normaliza -0 -> 0, pra um rendimento quase nulo
+// não aparecer como "-0,0%".
+const formatPct = (value: number) => {
+  const rounded = Math.round(value * 10) / 10 || 0;
+  return rounded.toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+};
+// Sinal/cor com epsilon: quem arredonda para 0,0% conta como não-negativo
+// (verde/"+"), evitando vermelho + seta pra baixo numa carteira estável.
+const pctIsNonNeg = (value: number) => Math.round(value * 10) / 10 >= 0;
 
 const InvestmentsPage = () => {
   const { family } = useFamily();
@@ -119,6 +127,7 @@ const InvestmentsPage = () => {
   const [plannedEditing, setPlannedEditing] = useState<PlannedItemRow | null>(null);
   const [scheduleDialogOpen, setScheduleDialogOpen] = useState(false);
   const [scheduleTarget, setScheduleTarget] = useState<PlannedItemRow | null>(null);
+  const [plannedToDelete, setPlannedToDelete] = useState<PlannedItemRow | null>(null);
 
   const [sortBy, setSortBy] = useState<SortOption>("highest_value");
   const [typeFilter, setTypeFilter] = useState<"all" | InvestmentType>("all");
@@ -162,6 +171,7 @@ const InvestmentsPage = () => {
       setLoading(false);
       return;
     }
+    if (plannedRes.error) toast.error("Erro ao carregar planejados");
 
     const normalized = ((invRes.data as Record<string, unknown>[] | null) ?? []).map<InvestmentRow>((row) => ({
       id: String(row.id ?? ""),
@@ -197,12 +207,18 @@ const InvestmentsPage = () => {
 
   const distribution = useMemo(() => {
     const total = Math.max(summary.current, 0);
+    // Tipos fora dos 7 conhecidos (ex.: dado legado) caem em "Outros", igual à
+    // lista — senão o valor entrava no total mas em nenhuma fatia e a pizza
+    // somava menos de 100%.
+    const knownTypes = new Set(INVESTMENT_TYPES.map((m) => m.value));
     return INVESTMENT_TYPES.map((meta) => {
-      const value = investments.filter((item) => item.type === meta.value).reduce((sum, item) => sum + Number(item.current_value || 0), 0);
+      const value = investments
+        .filter((item) => item.type === meta.value || (meta.value === "other" && !knownTypes.has(item.type)))
+        .reduce((sum, item) => sum + Number(item.current_value || 0), 0);
       const pct = total > 0 ? (value / total) * 100 : 0;
       return { type: meta.value, label: meta.label, value, pct, fill: meta.color };
     }).filter((entry) => entry.value > 0);
-  }, [investments, summary.current]);
+  }, [investments, summary]);
 
   const chartConfig = useMemo(
     () =>
@@ -447,8 +463,8 @@ const InvestmentsPage = () => {
                   {item.notes && <p className="mt-2 text-sm text-muted-foreground">{item.notes}</p>}
                   <div className="mt-4 flex items-center gap-2">
                     <Button size="sm" onClick={() => openSchedule(item)} className="h-8">Agendar</Button>
-                    <Button size="sm" variant="outline" onClick={() => openPlannedEdit(item)} className="h-8"><Pencil className="h-3.5 w-3.5" /></Button>
-                    <Button size="sm" variant="ghost" onClick={() => void deletePlanned(item)} className="h-8 text-muted-foreground hover:text-destructive"><Trash2 className="h-3.5 w-3.5" /></Button>
+                    <Button size="sm" variant="outline" aria-label="Editar planejado" onClick={() => openPlannedEdit(item)} className="h-8"><Pencil className="h-3.5 w-3.5" /></Button>
+                    <Button size="sm" variant="ghost" aria-label="Excluir planejado" onClick={() => setPlannedToDelete(item)} className="h-8 text-muted-foreground hover:text-destructive"><Trash2 className="h-3.5 w-3.5" /></Button>
                   </div>
                 </div>
               ))}
@@ -514,10 +530,10 @@ const InvestmentsPage = () => {
         <div className="glass-card rounded-xl border border-border bg-card p-5">
           <div className="flex items-center justify-between">
             <p className="text-xs font-semibold uppercase tracking-normal text-muted-foreground">Rendimento</p>
-            {summary.profit >= 0 ? <ArrowUpRight className="h-4 w-4 text-[hsl(var(--success))]" /> : <ArrowDownRight className="h-4 w-4 text-destructive" />}
+            {pctIsNonNeg(summary.profitPct) ? <ArrowUpRight className="h-4 w-4 text-[hsl(var(--success))]" /> : <ArrowDownRight className="h-4 w-4 text-destructive" />}
           </div>
-          <p className={cn("mt-3 text-2xl font-bold", summary.profit >= 0 ? "text-[hsl(var(--success))]" : "text-destructive")}>
-            {ptCurrency.format(summary.profit)} ({summary.profit >= 0 ? "+" : ""}
+          <p className={cn("mt-3 text-2xl font-bold", pctIsNonNeg(summary.profitPct) ? "text-[hsl(var(--success))]" : "text-destructive")}>
+            {ptCurrency.format(summary.profit)} ({pctIsNonNeg(summary.profitPct) ? "+" : ""}
             {formatPct(summary.profitPct)}%)
           </p>
         </div>
@@ -596,11 +612,11 @@ const InvestmentsPage = () => {
                   <span
                     className={cn(
                       "rounded-full px-3 py-1 text-xs font-semibold",
-                      profitPct >= 0 ? "text-[hsl(var(--success))]" : "text-destructive",
+                      pctIsNonNeg(profitPct) ? "text-[hsl(var(--success))]" : "text-destructive",
                     )}
-                    style={{ backgroundColor: profitPct >= 0 ? "hsl(var(--success) / 0.15)" : "hsl(var(--destructive) / 0.15)" }}
+                    style={{ backgroundColor: pctIsNonNeg(profitPct) ? "hsl(var(--success) / 0.15)" : "hsl(var(--destructive) / 0.15)" }}
                   >
-                    {profitPct >= 0 ? "+" : ""}
+                    {pctIsNonNeg(profitPct) ? "+" : ""}
                     {formatPct(profitPct)}%
                   </span>
                 </div>
@@ -798,6 +814,28 @@ const InvestmentsPage = () => {
         </AlertDialogContent>
       </AlertDialog>
       </>)}
+
+      <AlertDialog open={Boolean(plannedToDelete)} onOpenChange={(open) => !open && setPlannedToDelete(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Excluir planejado?</AlertDialogTitle>
+            <AlertDialogDescription>{plannedToDelete ? `Remove "${plannedToDelete.description}" da sua lista de planejados. Essa ação não pode ser desfeita.` : ""}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                const target = plannedToDelete;
+                setPlannedToDelete(null);
+                if (target) void deletePlanned(target);
+              }}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Excluir
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <PlannedItemDialog
         open={plannedDialogOpen}
