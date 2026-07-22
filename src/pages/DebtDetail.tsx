@@ -488,7 +488,7 @@ const DebtDetailPage = () => {
         </span>
       </div>
 
-      <section className="rounded-xl border p-5" style={{ backgroundColor: "#12121a", borderColor: "#1e1e2e" }}>
+      <section className="glass-card rounded-xl border p-5 bg-card border-border">
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
           <div className="space-y-2">
             <p className="text-sm text-muted-foreground">Tipo: <span className="text-foreground">{debt.type === "loan" ? "Empréstimo" : "Dívida"}</span></p>

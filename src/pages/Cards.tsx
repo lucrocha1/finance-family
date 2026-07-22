@@ -348,15 +348,15 @@ const CardsPage = () => {
       </div>
 
       <div className="flex flex-wrap gap-4">
-        <div className="min-w-[220px] flex-1 rounded-xl border p-5" style={{ backgroundColor: "#12121a", borderColor: "#1e1e2e" }}>
+        <div className="glass-card min-w-[220px] flex-1 rounded-xl border bg-card border-border p-5">
           <p className="text-xs font-semibold tracking-wide text-muted-foreground">LIMITE TOTAL</p>
           <p className="mt-2 text-3xl font-bold text-foreground">{ptCurrency.format(summary.totalLimit)}</p>
         </div>
-        <div className="min-w-[220px] flex-1 rounded-xl border p-5" style={{ backgroundColor: "#12121a", borderColor: "#1e1e2e" }}>
+        <div className="glass-card min-w-[220px] flex-1 rounded-xl border bg-card border-border p-5">
           <p className="text-xs font-semibold tracking-wide text-muted-foreground">UTILIZADO</p>
           <p className="mt-2 text-3xl font-bold text-destructive">{ptCurrency.format(summary.totalUsed)}</p>
         </div>
-        <div className="min-w-[220px] flex-1 rounded-xl border p-5" style={{ backgroundColor: "#12121a", borderColor: "#1e1e2e" }}>
+        <div className="glass-card min-w-[220px] flex-1 rounded-xl border bg-card border-border p-5">
           <p className="text-xs font-semibold tracking-wide text-muted-foreground">DISPONÍVEL</p>
           <p className="mt-2 text-3xl font-bold text-emerald-500">{ptCurrency.format(summary.totalAvailable)}</p>
         </div>

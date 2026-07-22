@@ -182,7 +182,7 @@ const parseDateByFormat = (value: string, format: DateFormat) => {
   if (!text) return null;
 
   if (format === "yyyymmdd") {
-    const match = text.match(/^(\d{4})[-\/.](\d{1,2})[-\/.](\d{1,2})$/);
+    const match = text.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/);
     if (!match) return null;
     const year = Number(match[1]);
     const month = Number(match[2]);
@@ -192,7 +192,7 @@ const parseDateByFormat = (value: string, format: DateFormat) => {
     return `${year.toString().padStart(4, "0")}-${month.toString().padStart(2, "0")}-${day.toString().padStart(2, "0")}`;
   }
 
-  const match = text.match(/^(\d{1,2})[-\/.](\d{1,2})[-\/.](\d{2,4})$/);
+  const match = text.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})$/);
   if (!match) return null;
 
   const first = Number(match[1]);
@@ -1133,7 +1133,7 @@ const MappingRow = ({
 );
 
 const MetricCard = ({ label, value, tone = "muted" }: { label: string; value: string; tone?: "muted" | "success" | "destructive" }) => (
-  <div className="rounded-lg border border-border bg-secondary/20 p-3">
+  <div className="glass-card rounded-lg border border-border bg-secondary/20 p-3">
     <p className="text-xs uppercase tracking-wide text-muted-foreground">{label}</p>
     <p className={cn("mt-1 font-semibold", tone === "success" && "text-success", tone === "destructive" && "text-destructive", tone === "muted" && "text-foreground")}>{value}</p>
   </div>

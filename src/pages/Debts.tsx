@@ -652,7 +652,7 @@ const DebtsPage = () => {
       </div>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-4">
-        <div className="rounded-xl border p-5" style={{ backgroundColor: "#12121a", borderColor: "#1e1e2e" }}>
+        <div className="glass-card rounded-xl border border-border bg-card p-5">
           <div className="flex items-center justify-between">
             <p className="text-xs font-semibold uppercase text-muted-foreground">Eu devo</p>
             <ArrowUpRight className="h-4 w-4 text-destructive" />
@@ -660,7 +660,7 @@ const DebtsPage = () => {
           <p className="mt-3 text-2xl font-bold text-destructive">{ptCurrency.format(summary.iOwe)}</p>
         </div>
 
-        <div className="rounded-xl border p-5" style={{ backgroundColor: "#12121a", borderColor: "#1e1e2e" }}>
+        <div className="glass-card rounded-xl border border-border bg-card p-5">
           <div className="flex items-center justify-between">
             <p className="text-xs font-semibold uppercase text-muted-foreground">Me devem</p>
             <ArrowDownLeft className="h-4 w-4 text-[hsl(var(--success))]" />
@@ -668,12 +668,12 @@ const DebtsPage = () => {
           <p className="mt-3 text-2xl font-bold text-[hsl(var(--success))]">{ptCurrency.format(summary.theyOwe)}</p>
         </div>
 
-        <div className="rounded-xl border p-5" style={{ backgroundColor: "#12121a", borderColor: "#1e1e2e" }}>
+        <div className="glass-card rounded-xl border border-border bg-card p-5">
           <p className="text-xs font-semibold uppercase text-muted-foreground">Saldo líquido</p>
           <p className={cn("mt-3 text-2xl font-bold", summary.net >= 0 ? "text-[hsl(var(--success))]" : "text-destructive")}>{ptCurrency.format(summary.net)}</p>
         </div>
 
-        <div className="rounded-xl border p-5" style={{ backgroundColor: "#12121a", borderColor: "#1e1e2e" }}>
+        <div className="glass-card rounded-xl border border-border bg-card p-5">
           <p className="text-xs font-semibold uppercase text-muted-foreground">Próximo vencimento</p>
           {!summary.upcoming ? (
             <p className="mt-3 text-sm text-muted-foreground">Nenhuma dívida</p>

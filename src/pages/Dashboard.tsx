@@ -734,7 +734,7 @@ const DashboardPage = () => {
         </div>
       </div>
 
-      <Card className="rounded-xl border-border bg-card">
+      <Card className="glass-card rounded-xl border-border bg-card">
         <CardContent className="grid grid-cols-1 gap-4 p-5 sm:grid-cols-3">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.5px] text-muted-foreground">Saldo atual</p>
@@ -903,7 +903,7 @@ const DashboardPage = () => {
           </CardContent>
         </Card>
 
-        <Card className="rounded-xl border-border bg-card">
+        <Card className="glass-card rounded-xl border-border bg-card">
           <CardHeader className="space-y-3">
             <p className="text-xs font-semibold uppercase tracking-[0.5px] text-muted-foreground">Fluxo do período</p>
             <CardDescription className="text-sm text-muted-foreground">Receitas menos despesas no mês</CardDescription>
@@ -931,7 +931,7 @@ const DashboardPage = () => {
           </CardContent>
         </Card>
 
-        <Card className="rounded-xl border-border bg-card">
+        <Card className="glass-card rounded-xl border-border bg-card">
           <CardHeader>
             <CardTitle className="text-lg font-semibold">Resumo rápido</CardTitle>
           </CardHeader>

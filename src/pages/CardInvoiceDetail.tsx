@@ -498,20 +498,20 @@ const CardInvoiceDetailPage = () => {
 
       <div className="grid gap-4 lg:grid-cols-[1fr_220px]">
         <div className="flex flex-wrap gap-4">
-          <div className="min-w-[220px] flex-1 rounded-xl border p-5" style={{ backgroundColor: "#12121a", borderColor: "#1e1e2e" }}>
+          <div className="glass-card min-w-[220px] flex-1 rounded-xl border p-5 bg-card border-border">
             <p className="text-xs font-semibold tracking-wide text-muted-foreground">TOTAL DA FATURA</p>
             <p className="mt-2 text-3xl font-bold text-foreground">{ptCurrency.format(invoiceTotal)}</p>
           </div>
-          <div className="min-w-[220px] flex-1 rounded-xl border p-5" style={{ backgroundColor: "#12121a", borderColor: "#1e1e2e" }}>
+          <div className="glass-card min-w-[220px] flex-1 rounded-xl border p-5 bg-card border-border">
             <p className="text-xs font-semibold tracking-wide text-muted-foreground">VENCIMENTO</p>
             <p className="mt-2 text-3xl font-bold text-foreground">{formatDateDDMMYYYY(dueDate)}</p>
           </div>
-          <div className="min-w-[220px] flex-1 rounded-xl border p-5" style={{ backgroundColor: "#12121a", borderColor: "#1e1e2e" }}>
+          <div className="glass-card min-w-[220px] flex-1 rounded-xl border p-5 bg-card border-border">
             <p className="text-xs font-semibold tracking-wide text-muted-foreground">STATUS</p>
             <p className={cn("mt-2 text-3xl font-bold", invoiceStatus.className)}>{invoiceStatus.label}</p>
           </div>
           {cardSpent && cardSpent.limit > 0 && (
-            <div className="min-w-[220px] flex-1 rounded-xl border p-5" style={{ backgroundColor: "#12121a", borderColor: "#1e1e2e" }}>
+            <div className="glass-card min-w-[220px] flex-1 rounded-xl border p-5 bg-card border-border">
               <p className="text-xs font-semibold tracking-wide text-muted-foreground">LIMITE</p>
               <p className="mt-2 text-2xl font-bold tabular-nums text-foreground">
                 {ptCurrency.format(cardSpent.spent)}

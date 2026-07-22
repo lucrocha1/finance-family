@@ -920,21 +920,21 @@ const TransactionsPage = () => {
           {plannedItems.length > 0 && (
             <>
               <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-                <Card className="rounded-xl border-border bg-card">
+                <Card className="glass-card rounded-xl border-border bg-card">
                   <CardContent className="p-4">
                     <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Despesas planejadas</p>
                     <p className="mt-1 text-xl font-bold tabular-nums text-destructive">{ptCurrency.format(plannedStats.totalExpense)}</p>
                     <p className="text-xs text-muted-foreground">{plannedStats.countExpense} {plannedStats.countExpense === 1 ? "item" : "itens"}</p>
                   </CardContent>
                 </Card>
-                <Card className="rounded-xl border-border bg-card">
+                <Card className="glass-card rounded-xl border-border bg-card">
                   <CardContent className="p-4">
                     <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Receitas planejadas</p>
                     <p className="mt-1 text-xl font-bold tabular-nums text-success">{ptCurrency.format(plannedStats.totalIncome)}</p>
                     <p className="text-xs text-muted-foreground">{plannedStats.countIncome} {plannedStats.countIncome === 1 ? "item" : "itens"}</p>
                   </CardContent>
                 </Card>
-                <Card className="rounded-xl border-border bg-card">
+                <Card className="glass-card rounded-xl border-border bg-card">
                   <CardContent className="p-4">
                     <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Saldo planejado</p>
                     <p className={cn("mt-1 text-xl font-bold tabular-nums", plannedStats.balance >= 0 ? "text-foreground" : "text-destructive")}>
@@ -943,7 +943,7 @@ const TransactionsPage = () => {
                     <p className="text-xs text-muted-foreground">Receitas − despesas</p>
                   </CardContent>
                 </Card>
-                <Card className="rounded-xl border-border bg-card">
+                <Card className="glass-card rounded-xl border-border bg-card">
                   <CardContent className="p-4">
                     <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Próximo alvo</p>
                     {plannedStats.nextItem ? (
@@ -963,7 +963,7 @@ const TransactionsPage = () => {
                 </Card>
               </div>
 
-              <Card className="rounded-xl border-border bg-card">
+              <Card className="glass-card rounded-xl border-border bg-card">
                 <CardContent className="p-4">
                   <div className="mb-2 flex items-center justify-between">
                     <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Por prioridade</p>
@@ -1092,10 +1092,10 @@ const TransactionsPage = () => {
       </div>
 
       <div className="flex flex-col gap-4 md:flex-row">
-        <Card className="flex-1 rounded-lg border-border bg-card"><CardContent className="flex items-center gap-3 p-4"><span className="rounded-full bg-success/20 p-2 text-success"><ArrowUp className="h-4 w-4" /></span><div><p className="text-xs uppercase tracking-[0.5px] text-muted-foreground">Receitas</p><p className="text-lg font-semibold tabular-nums text-success">{ptCurrency.format(totals.income)}</p></div></CardContent></Card>
-        <Card className="flex-1 rounded-lg border-border bg-card"><CardContent className="flex items-center gap-3 p-4"><span className="rounded-full bg-destructive/20 p-2 text-destructive"><ArrowDown className="h-4 w-4" /></span><div><p className="text-xs uppercase tracking-[0.5px] text-muted-foreground">Despesas</p><p className="text-lg font-semibold tabular-nums text-destructive">{ptCurrency.format(totals.expense)}</p></div></CardContent></Card>
-        <Card className="flex-1 rounded-lg border-border bg-card"><CardContent className="p-4"><p className="text-xs uppercase tracking-[0.5px] text-muted-foreground">Saldo do mês</p><p className={cn("text-lg font-semibold tabular-nums", totals.balance >= 0 ? "text-success" : "text-destructive")}>{ptCurrency.format(totals.balance)}</p></CardContent></Card>
-        <Card className="flex-1 rounded-lg border-border bg-card">
+        <Card className="glass-card flex-1 rounded-lg border-border bg-card"><CardContent className="flex items-center gap-3 p-4"><span className="rounded-full bg-success/20 p-2 text-success"><ArrowUp className="h-4 w-4" /></span><div><p className="text-xs uppercase tracking-[0.5px] text-muted-foreground">Receitas</p><p className="text-lg font-semibold tabular-nums text-success">{ptCurrency.format(totals.income)}</p></div></CardContent></Card>
+        <Card className="glass-card flex-1 rounded-lg border-border bg-card"><CardContent className="flex items-center gap-3 p-4"><span className="rounded-full bg-destructive/20 p-2 text-destructive"><ArrowDown className="h-4 w-4" /></span><div><p className="text-xs uppercase tracking-[0.5px] text-muted-foreground">Despesas</p><p className="text-lg font-semibold tabular-nums text-destructive">{ptCurrency.format(totals.expense)}</p></div></CardContent></Card>
+        <Card className="glass-card flex-1 rounded-lg border-border bg-card"><CardContent className="p-4"><p className="text-xs uppercase tracking-[0.5px] text-muted-foreground">Saldo do mês</p><p className={cn("text-lg font-semibold tabular-nums", totals.balance >= 0 ? "text-success" : "text-destructive")}>{ptCurrency.format(totals.balance)}</p></CardContent></Card>
+        <Card className="glass-card flex-1 rounded-lg border-border bg-card">
           <CardContent className="p-4">
             <p className="text-xs uppercase tracking-[0.5px] text-primary">Saldo Projetado</p>
             <p className={cn("text-lg font-semibold tabular-nums", projected.projected >= 0 ? "text-foreground" : "text-destructive")}>

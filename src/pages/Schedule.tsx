@@ -815,7 +815,7 @@ const SchedulePage = () => {
         </section>
 
         <section className="space-y-4">
-          <div className="rounded-xl border p-4" style={{ backgroundColor: "#12121a", borderColor: "#1e1e2e" }}>
+          <div className="glass-card rounded-xl border border-border bg-card p-4">
             <p className="mb-3 text-sm font-semibold text-foreground">Resumo do Mês</p>
 
             <div className="space-y-2 text-sm">

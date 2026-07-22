@@ -495,7 +495,7 @@ const InvestmentsPage = () => {
       </div>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-4">
-        <div className="rounded-xl border p-5" style={{ backgroundColor: "#12121a", borderColor: "#1e1e2e" }}>
+        <div className="glass-card rounded-xl border border-border bg-card p-5">
           <div className="flex items-center justify-between">
             <p className="text-xs font-semibold uppercase tracking-normal text-muted-foreground">Total Investido</p>
             <Wallet className="h-4 w-4 text-accent" />
@@ -503,7 +503,7 @@ const InvestmentsPage = () => {
           <p className="mt-3 text-2xl font-bold text-foreground">{ptCurrency.format(summary.invested)}</p>
         </div>
 
-        <div className="rounded-xl border p-5" style={{ backgroundColor: "#12121a", borderColor: "#1e1e2e" }}>
+        <div className="glass-card rounded-xl border border-border bg-card p-5">
           <div className="flex items-center justify-between">
             <p className="text-xs font-semibold uppercase tracking-normal text-muted-foreground">Valor Atual</p>
             <TrendingUp className="h-4 w-4 text-accent" />
@@ -511,7 +511,7 @@ const InvestmentsPage = () => {
           <p className="mt-3 text-2xl font-bold text-foreground">{ptCurrency.format(summary.current)}</p>
         </div>
 
-        <div className="rounded-xl border p-5" style={{ backgroundColor: "#12121a", borderColor: "#1e1e2e" }}>
+        <div className="glass-card rounded-xl border border-border bg-card p-5">
           <div className="flex items-center justify-between">
             <p className="text-xs font-semibold uppercase tracking-normal text-muted-foreground">Rendimento</p>
             {summary.profit >= 0 ? <ArrowUpRight className="h-4 w-4 text-[hsl(var(--success))]" /> : <ArrowDownRight className="h-4 w-4 text-destructive" />}

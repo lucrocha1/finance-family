@@ -637,19 +637,19 @@ const GoalsPage = () => {
           </div>
 
           <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-            <Card>
+            <Card className="glass-card">
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm font-semibold text-muted-foreground">Orçamento Total</CardTitle>
               </CardHeader>
               <CardContent className="pt-0 text-2xl font-bold text-foreground">{ptCurrency.format(budgetSummary.totalBudget)}</CardContent>
             </Card>
-            <Card>
+            <Card className="glass-card">
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm font-semibold text-muted-foreground">Gasto (categorias com limite)</CardTitle>
               </CardHeader>
               <CardContent className="pt-0 text-2xl font-bold text-foreground">{ptCurrency.format(budgetSummary.totalSpent)}</CardContent>
             </Card>
-            <Card>
+            <Card className="glass-card">
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm font-semibold text-muted-foreground">Disponível</CardTitle>
               </CardHeader>
@@ -785,13 +785,13 @@ const GoalsPage = () => {
         <div className="space-y-6">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <Card>
+              <Card className="glass-card">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-sm font-semibold text-muted-foreground">Total em Metas</CardTitle>
                 </CardHeader>
                 <CardContent className="pt-0 text-2xl font-bold text-foreground">{ptCurrency.format(goalsSummary.totalCurrent)}</CardContent>
               </Card>
-              <Card>
+              <Card className="glass-card">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-sm font-semibold text-muted-foreground">Falta Juntar</CardTitle>
                 </CardHeader>
