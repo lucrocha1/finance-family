@@ -37,7 +37,6 @@ import { cn } from "@/lib/utils";
 type Step = 1 | 2 | 3 | 4;
 type DateFormat = "ddmmyyyy" | "yyyymmdd" | "mmddyyyy" | "ddmmyy";
 type DecimalSeparator = "comma" | "dot";
-type TypeMode = "detect" | "income" | "expense";
 
 type AccountRow = { id: string; name: string; institution: string | null };
 
@@ -387,9 +386,12 @@ const ImportCsvPage = () => {
       if (mapping.type === "__detect__") {
         nextType = parsedAmount < 0 ? "expense" : "income";
       } else {
-        const normalized = typeCell.toLowerCase();
-        if (["income", "receita", "entrada", "credit", "credito"].some((term) => normalized.includes(term))) nextType = "income";
-        else if (["expense", "despesa", "saida", "debit", "débito", "debito"].some((term) => normalized.includes(term))) nextType = "expense";
+        // Remove acentos antes de comparar: "Crédito"/"Saída" (com acento) não
+        // casavam com os termos sem acento e a linha virava "Tipo inválido" —
+        // com "ignorar linhas com erro" ligado, sumia receita/despesa em silêncio.
+        const normalized = typeCell.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").trim();
+        if (normalized === "c" || ["income", "receita", "entrada", "credit", "credito"].some((term) => normalized.includes(term))) nextType = "income";
+        else if (normalized === "d" || ["expense", "despesa", "saida", "debit", "debito"].some((term) => normalized.includes(term))) nextType = "expense";
         else {
           return {
             index: lineIndex,
@@ -448,18 +450,22 @@ const ImportCsvPage = () => {
     if (!family?.id) return;
 
     setLoading(true);
+    // Dados por usuário: a RLS (user_id = auth.uid()) já isola. Filtrar por
+    // family_id era redundante e escondia contas/categorias/histórico com
+    // family_id defasado (ex.: criados antes de trocar de família) — a conta
+    // sumia do Select e a categoria não casava no import.
     const [accountsRes, historyRes, categoriesRes] = await Promise.all([
-      supabase.from("accounts").select("id, name, institution").eq("family_id", family.id).order("name", { ascending: true }),
+      supabase.from("accounts").select("id, name, institution").order("name", { ascending: true }),
       supabase
         .from("csv_imports")
         .select("id, created_at, filename, status, rows_imported, rows_total, account_id")
-        .eq("family_id", family.id)
         .order("created_at", { ascending: false }),
-      supabase.from("categories").select("id, name").eq("family_id", family.id),
+      supabase.from("categories").select("id, name"),
     ]);
 
     if (accountsRes.error) toast.error("Erro ao carregar contas");
     if (historyRes.error) toast.error("Erro ao carregar histórico de importações");
+    if (categoriesRes.error) toast.error("Erro ao carregar categorias — a categorização por nome pode não funcionar");
 
     setAccounts((accountsRes.data as AccountRow[] | null) ?? []);
     setHistory((historyRes.data as CsvImportRow[] | null) ?? []);
@@ -556,23 +562,36 @@ const ImportCsvPage = () => {
     // datas do arquivo e pula linhas com mesma (date, amount, type, description).
     // Reimportar o mesmo extrato (ou um com período sobreposto) não duplica mais.
     const dates = validRows.map((row) => row.date as string).sort();
-    const { data: existingTx } = await supabase
+    const { data: existingTx, error: dedupError } = await supabase
       .from("transactions")
       .select("date, amount, type, description")
       .eq("account_id", selectedAccountId)
       .gte("date", dates[0])
       .lte("date", dates[dates.length - 1]);
+    // Se a checagem de duplicatas falhar, aborta em vez de prosseguir sem
+    // deduplicar (o que duplicaria tudo numa reimportação).
+    if (dedupError) {
+      setImporting(false);
+      toast.error("Não foi possível verificar duplicatas. Tente novamente.");
+      return;
+    }
     const keyOf = (d: string, a: number, t: string, desc: string | null) =>
       `${d}|${Number(a).toFixed(2)}|${t}|${(desc ?? "").trim().toLowerCase()}`;
-    const existingKeys = new Set(
-      (existingTx ?? []).map((t: { date: string; amount: number; type: string; description: string | null }) =>
-        keyOf(t.date, Number(t.amount), t.type, t.description),
-      ),
-    );
+    // Contagem por chave (não Set): pula apenas o que JÁ existe no banco e
+    // preserva N ocorrências legítimas iguais dentro do arquivo (ex.: dois
+    // cafés de R$5 no mesmo dia com a mesma descrição).
+    const existingCount = new Map<string, number>();
+    (existingTx ?? []).forEach((t: { date: string; amount: number; type: string; description: string | null }) => {
+      const k = keyOf(t.date, Number(t.amount), t.type, t.description);
+      existingCount.set(k, (existingCount.get(k) ?? 0) + 1);
+    });
     const dedupedRows = validRows.filter((row) => {
       const key = keyOf(row.date as string, Number(row.amount), row.type as string, row.description);
-      if (existingKeys.has(key)) return false;
-      existingKeys.add(key); // também deduplica dentro do próprio arquivo
+      const remaining = existingCount.get(key) ?? 0;
+      if (remaining > 0) {
+        existingCount.set(key, remaining - 1);
+        return false;
+      }
       return true;
     });
 
@@ -1035,7 +1054,7 @@ const ImportCsvPage = () => {
                           {item.status === "done" ? <Badge className="bg-success/20 text-success">Concluído</Badge> : <Badge className="bg-destructive/20 text-destructive">Erro</Badge>}
                         </td>
                         <td className="p-2">
-                          <Button size="icon" variant="ghost" className="h-8 w-8 text-muted-foreground hover:text-destructive" onClick={() => setDeleteHistoryId(item.id)}>
+                          <Button size="icon" variant="ghost" aria-label="Excluir registro de importação" className="h-8 w-8 text-muted-foreground hover:text-destructive" onClick={() => setDeleteHistoryId(item.id)}>
                             <Trash2 className="h-4 w-4" />
                           </Button>
                         </td>
