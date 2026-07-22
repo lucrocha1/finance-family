@@ -43,9 +43,15 @@ export const getOpenInvoiceWindow = (
   const year = today.getFullYear();
   const month = today.getMonth();
   const day = today.getDate();
-  // Com regra de "closingDay vai pra próxima", se hoje >= closingDay já
+  // closingDay EFETIVO do mês corrente (clampado ao último dia do mês): sem
+  // isso, em meses curtos com closingDay 29-31, `day >= closingDay` nunca é
+  // verdade no último dia e a janela aberta volta um ciclo, divergindo da
+  // fatura exibida e deixando compras de hoje fora do limite (F10/F11).
+  const lastDayThisMonth = new Date(year, month + 1, 0).getDate();
+  const effectiveClosing = Math.min(closingDay, lastDayThisMonth);
+  // Com regra de "closingDay vai pra próxima", se hoje >= fechamento efetivo já
   // estamos no ciclo que fecha no PRÓXIMO mês.
-  const nextClosing = day >= closingDay
+  const nextClosing = day >= effectiveClosing
     ? clampDay(year, month + 1, closingDay)
     : clampDay(year, month, closingDay);
   const prevClosing = clampDay(nextClosing.getFullYear(), nextClosing.getMonth() - 1, closingDay);

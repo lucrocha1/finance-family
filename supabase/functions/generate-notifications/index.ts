@@ -21,11 +21,25 @@ const ptCurrency = (n: number) =>
   new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(n);
 
 const toIso = (d: Date) => d.toISOString().slice(0, 10);
-const today = () => toIso(new Date());
+// Datas no fuso America/Sao_Paulo (BRT). Usar UTC fazia "hoje"/"amanhã" virarem
+// cedo demais no fim do dia (após ~21h BRT já é o dia seguinte em UTC), gerando
+// alertas de "hoje"/"atrasado" no dia errado (F49).
+const BRT_TZ = "America/Sao_Paulo";
+const brtParts = (base = new Date()) => {
+  const fmt = new Intl.DateTimeFormat("en-CA", { timeZone: BRT_TZ, year: "numeric", month: "2-digit", day: "2-digit" });
+  const p = fmt.formatToParts(base);
+  const get = (t: string) => Number(p.find((x) => x.type === t)!.value);
+  return { y: get("year"), m: get("month"), d: get("day") };
+};
+const pad2 = (n: number) => String(n).padStart(2, "0");
+const today = () => {
+  const { y, m, d } = brtParts();
+  return `${y}-${pad2(m)}-${pad2(d)}`;
+};
 const tomorrow = () => {
-  const d = new Date();
-  d.setDate(d.getDate() + 1);
-  return toIso(d);
+  const { y, m, d } = brtParts();
+  const t = new Date(Date.UTC(y, m - 1, d + 1));
+  return `${t.getUTCFullYear()}-${pad2(t.getUTCMonth() + 1)}-${pad2(t.getUTCDate())}`;
 };
 const isoWeek = (d = new Date()) => {
   const target = new Date(d.valueOf());
@@ -275,12 +289,15 @@ const checkCardClosingDue = async (sb: SupabaseClient, userId: string) => {
     .eq("user_id", userId);
   if (!cards) return;
 
-  const tomorrowDay = new Date();
-  tomorrowDay.setDate(tomorrowDay.getDate() + 1);
-  const tDay = tomorrowDay.getDate();
+  // Amanhã em BRT + normalização do dia de fechamento/vencimento ao último dia
+  // do mês: cartões com closing/due day 29-31 em meses curtos nunca casavam com
+  // um "amanhã" cujo getDate() nunca chega a 31 (fev/abr/etc.) — F50.
+  const tIso = tomorrow();
+  const [tY, tM, tDay] = tIso.split("-").map(Number);
+  const lastDayTMonth = new Date(Date.UTC(tY, tM, 0)).getUTCDate();
   const items: Notif[] = [];
   for (const c of cards) {
-    if (Number(c.closing_day) === tDay) {
+    if (Math.min(Number(c.closing_day), lastDayTMonth) === tDay) {
       items.push({
         user_id: userId,
         kind: "card_closing",
@@ -292,7 +309,7 @@ const checkCardClosingDue = async (sb: SupabaseClient, userId: string) => {
         dedup_key: `card_closing:${c.id}:${monthKey()}`,
       });
     }
-    if (Number(c.due_day) === tDay) {
+    if (Math.min(Number(c.due_day), lastDayTMonth) === tDay) {
       items.push({
         user_id: userId,
         kind: "card_due",

@@ -133,11 +133,13 @@ export const useUpcomingDueDates = (familyId: string | null | undefined) => {
           const dueIso = toIso(dueDate);
           if (dueIso < today || dueIso > end) continue;
 
+          // Convenção alinhada com lib/cardCycle: [prevClosing (inclusive),
+          // closingDate - 1]. Antes deslocava 1 dia (F54).
           const prevClosing = clampDay(ref.getFullYear(), ref.getMonth() - 1, closingDay);
-          const cycleStart = new Date(prevClosing);
-          cycleStart.setDate(cycleStart.getDate() + 1);
-          const startIso = toIso(cycleStart);
-          const endIsoCycle = toIso(closingDate);
+          const startIso = toIso(prevClosing);
+          const cycleEndDate = new Date(closingDate);
+          cycleEndDate.setDate(cycleEndDate.getDate() - 1);
+          const endIsoCycle = toIso(cycleEndDate);
           const total = cardTxs
             .filter((tx) => tx.card_id === card.id && tx.date >= startIso && tx.date <= endIsoCycle)
             .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);

@@ -32,19 +32,29 @@ type Parent = {
 };
 
 const addInterval = (iso: string, type: Parent["recurrence_type"], anchorDay: number | null): string => {
-  const d = new Date(`${iso}T00:00:00`);
+  const [y, m, day] = iso.split("-").map(Number); // m é 1-based
   if (type === "weekly") {
+    const d = new Date(`${iso}T00:00:00`);
     d.setDate(d.getDate() + 7);
-  } else if (type === "monthly") {
-    d.setMonth(d.getMonth() + 1);
-    if (anchorDay) {
-      const lastDayOfMonth = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
-      d.setDate(Math.min(anchorDay, lastDayOfMonth));
-    }
-  } else if (type === "yearly") {
-    d.setFullYear(d.getFullYear() + 1);
+    return d.toISOString().slice(0, 10);
   }
-  return d.toISOString().slice(0, 10);
+  if (type === "monthly") {
+    // Aritmética por ano/mês (NÃO setMonth): dias 29-31 estouravam o mês e
+    // pulavam meses inteiros (F6, mesmo bug do gerador client-side).
+    const targetIndex = m; // próximo mês, 0-based
+    const year = y + Math.floor(targetIndex / 12);
+    const month = ((targetIndex % 12) + 12) % 12;
+    const lastDay = new Date(year, month + 1, 0).getDate();
+    const dd = Math.min(anchorDay ?? day, lastDay);
+    return `${year}-${String(month + 1).padStart(2, "0")}-${String(dd).padStart(2, "0")}`;
+  }
+  if (type === "yearly") {
+    const year = y + 1;
+    const lastDay = new Date(year, m, 0).getDate();
+    const dd = Math.min(anchorDay ?? day, lastDay);
+    return `${year}-${String(m).padStart(2, "0")}-${String(dd).padStart(2, "0")}`;
+  }
+  return iso;
 };
 
 Deno.serve(async (_req: Request) => {
@@ -110,7 +120,9 @@ Deno.serve(async (_req: Request) => {
     }
 
     if (toInsert.length > 0) {
-      const { error: insertErr } = await supabase.from("transactions").insert(toInsert);
+      const { error: insertErr } = await supabase
+        .from("transactions")
+        .upsert(toInsert, { onConflict: "recurrence_parent_id,date", ignoreDuplicates: true });
       if (insertErr) {
         errors.push(`parent=${parent.id}: ${insertErr.message}`);
       } else {

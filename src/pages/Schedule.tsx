@@ -92,10 +92,14 @@ const buildCardEvents = (
 
       // Cycle of THIS closing: previous closing day + 1 → closingDate
       const prevClosing = clampDay(monthRef.getFullYear(), monthRef.getMonth() - 1, closingDay);
-      const cycleStart = new Date(prevClosing);
-      cycleStart.setDate(cycleStart.getDate() + 1);
-      const cycleStartIso = toISODate(cycleStart);
-      const cycleEndIso = toISODate(closingDate);
+      // Convenção alinhada com lib/cardCycle: ciclo = [prevClosing (inclusive),
+      // closingDate - 1]; compra no dia do fechamento entra na PRÓXIMA fatura.
+      // Antes era [prevClosing+1, closingDate], deslocado 1 dia e divergindo do
+      // CardInvoiceDetail/Dashboard pro mesmo cartão (F54).
+      const cycleStartIso = toISODate(prevClosing);
+      const cycleEndDate = new Date(closingDate);
+      cycleEndDate.setDate(cycleEndDate.getDate() - 1);
+      const cycleEndIso = toISODate(cycleEndDate);
       const total = cardTransactions
         .filter((tx) => tx.card_id === card.id && tx.date >= cycleStartIso && tx.date <= cycleEndIso)
         .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);

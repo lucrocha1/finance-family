@@ -30,19 +30,31 @@ const toIso = (d: Date) => {
 };
 
 const addInterval = (iso: string, type: RecurrenceType, anchorDay: number | null): string => {
-  const d = new Date(`${iso}T00:00:00`);
+  const [y, m, day] = iso.split("-").map(Number); // m é 1-based
   if (type === "weekly") {
+    const d = new Date(`${iso}T00:00:00`);
     d.setDate(d.getDate() + 7);
-  } else if (type === "monthly") {
-    d.setMonth(d.getMonth() + 1);
-    if (anchorDay) {
-      const lastDay = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
-      d.setDate(Math.min(anchorDay, lastDay));
-    }
-  } else if (type === "yearly") {
-    d.setFullYear(d.getFullYear() + 1);
+    return toIso(d);
   }
-  return toIso(d);
+  if (type === "monthly") {
+    // Aritmética por ano/mês (NÃO setMonth): senão dias 29-31 estouram o mês e
+    // pulam meses inteiros (Jan/31 -> setMonth -> Fev/31 -> overflow p/ Mar,
+    // deixando Fevereiro sem ocorrência — F5). anchorDay preserva o dia original.
+    const targetIndex = m; // próximo mês, 0-based
+    const year = y + Math.floor(targetIndex / 12);
+    const month = ((targetIndex % 12) + 12) % 12; // 0..11
+    const lastDay = new Date(year, month + 1, 0).getDate();
+    const dd = Math.min(anchorDay ?? day, lastDay);
+    return `${year}-${String(month + 1).padStart(2, "0")}-${String(dd).padStart(2, "0")}`;
+  }
+  if (type === "yearly") {
+    // Clamp pro caso 29/02 em ano não-bissexto.
+    const year = y + 1;
+    const lastDay = new Date(year, m, 0).getDate(); // último dia do mês m (1-based)
+    const dd = Math.min(anchorDay ?? day, lastDay);
+    return `${year}-${String(m).padStart(2, "0")}-${String(dd).padStart(2, "0")}`;
+  }
+  return iso;
 };
 
 // Calcula horizon efetivo: max(today + 90d, targetEndIso + 30d). Se
@@ -144,7 +156,13 @@ export const generateRecurrencesForFamily = async (
     }
 
     if (toInsert.length > 0) {
-      const { error: insertErr } = await supabase.from("transactions").insert(toInsert);
+      // upsert com ignoreDuplicates (ON CONFLICT DO NOTHING) em vez de insert:
+      // se duas gerações concorrentes montam lotes sobrepostos, as linhas em
+      // conflito são ignoradas em vez de abortar o lote INTEIRO e perder as
+      // ocorrências novas (F7). Constraint única: (recurrence_parent_id, date).
+      const { error: insertErr } = await supabase
+        .from("transactions")
+        .upsert(toInsert, { onConflict: "recurrence_parent_id,date", ignoreDuplicates: true });
       if (!insertErr) created += toInsert.length;
     }
   }
