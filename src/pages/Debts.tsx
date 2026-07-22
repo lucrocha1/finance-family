@@ -518,6 +518,17 @@ const DebtsPage = () => {
     if (!editing) return;
     setDeleting(true);
 
+    // Reverte as transações bancárias vinculadas aos pagamentos desta dívida
+    // (F19/F44) antes de apagar os pagamentos, senão o saldo da conta fica
+    // debitado sem contrapartida.
+    const linkedTx = await supabase.from("debt_payments").select("transaction_id").eq("debt_id", editing.id);
+    const txIds = ((linkedTx.data as { transaction_id: string | null }[] | null) ?? [])
+      .map((p) => p.transaction_id)
+      .filter((v): v is string => Boolean(v));
+    if (txIds.length > 0) {
+      await supabase.from("transactions").delete().in("id", txIds);
+    }
+
     const paymentsDelete = await supabase.from("debt_payments").delete().eq("debt_id", editing.id);
     if (paymentsDelete.error) {
       setDeleting(false);
@@ -592,31 +603,13 @@ const DebtsPage = () => {
       return;
     }
 
-    const updatedPaid = Number(paymentDebt.amount_paid || 0) + amount;
-    const total = getTotal(paymentDebt);
-    const paidOff = updatedPaid >= total - 0.009;
-
-    const updates: Record<string, unknown> = {
-      amount_paid: updatedPaid,
-      status: paidOff ? "paid_off" : "active",
-    };
-
-    if (paymentDebt.has_installments) {
-      updates.installments_paid = Math.min((paymentDebt.installments_paid ?? 0) + 1, paymentDebt.total_installments ?? 1);
-      if (!paidOff && paymentDebt.due_date) {
-        updates.due_date = addMonths(paymentDebt.due_date, 1);
-      }
-    }
-
-    const debtUpdate = await supabase.from("debts").update(updates).eq("id", paymentDebt.id);
-
     setPaymentSaving(false);
 
-    if (debtUpdate.error) {
-      toast.error(debtUpdate.error.message || "Erro ao atualizar dívida");
-      return;
-    }
-
+    // amount_paid, installments_paid, status e due_date são recalculados pelo
+    // trigger debt_payments_recompute a partir da soma dos pagamentos. Antes,
+    // este bloco fazia read-modify-write (lost update entre duas sessões — F22),
+    // contava qualquer pagamento como uma parcela cheia (F17) e empurrava o
+    // due_date um mês além do fim do empréstimo a cada pagamento (F18).
     setPaymentOpen(false);
     toast.success(`Pagamento de ${ptCurrency.format(amount)} registrado`);
     await loadData();

@@ -66,6 +66,7 @@ type DebtPaymentRow = {
   installment_number: number | null;
   notes: string | null;
   created_at: string | null;
+  transaction_id?: string | null;
 };
 
 type ScheduleRow = {
@@ -250,74 +251,44 @@ const DebtDetailPage = () => {
   const schedule = useMemo<ScheduleRow[]>(() => {
     if (!debt?.has_installments || !debt.total_installments) return [];
 
-    const rows: ScheduleRow[] = [];
-    let nextPendingInstallment: number | null = null;
+    // Parcela é "paga" quando o total pago cobre até ela (installments_paid,
+    // derivado por floor(total_pago / valor_parcela) no trigger). Assim um
+    // pagamento PARCIAL não marca a parcela como quitada (F17). A próxima em
+    // aberto é installments_paid + 1.
+    const paidCount = debt.installments_paid ?? 0;
+    const nextPendingInstallment = paidCount < debt.total_installments ? paidCount + 1 : null;
 
+    const rows: ScheduleRow[] = [];
     for (let installment = 1; installment <= debt.total_installments; installment += 1) {
       const dueDate = addMonths(debt.start_date, installment);
       const payment = paymentsByInstallment.get(installment) ?? null;
-      let status: ScheduleRow["status"] = "future";
-
-      if (payment) {
+      let status: ScheduleRow["status"];
+      if (installment <= paidCount) {
         status = "paid";
-      } else if (dueDate < todayIso()) {
-        status = "overdue";
+      } else if (installment === nextPendingInstallment) {
+        status = dueDate < todayIso() ? "overdue" : "pending";
       } else {
-        status = "pending";
-      }
-
-      if (!payment && nextPendingInstallment === null && (status === "pending" || status === "overdue")) {
-        nextPendingInstallment = installment;
-      }
-
-      if (!payment && status === "pending" && nextPendingInstallment !== installment) {
         status = "future";
       }
-
       rows.push({
         installment,
         dueDate,
         amount: debt.installment_amount ?? total / debt.total_installments,
         payment,
         status,
-        isCurrent: false,
+        isCurrent: installment === nextPendingInstallment,
       });
     }
-
-    return rows.map((row) => ({ ...row, isCurrent: row.installment === nextPendingInstallment }));
+    return rows;
   }, [debt, paymentsByInstallment, total]);
-
-  const recalcDebtFromPayments = useCallback(
-    (item: DebtRow, currentPayments: DebtPaymentRow[]) => {
-      const nextAmountPaid = currentPayments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
-      const nextInstallmentsPaid = item.has_installments
-        ? new Set(currentPayments.map((payment) => payment.installment_number).filter((value): value is number => Boolean(value))).size
-        : null;
-
-      const paidOff = nextAmountPaid >= getTotal(item) - 0.009;
-
-      let nextDueDate = item.due_date;
-      if (item.has_installments && item.total_installments) {
-        const paidSet = new Set(currentPayments.map((payment) => payment.installment_number).filter((value): value is number => Boolean(value)));
-        const nextOpenInstallment = Array.from({ length: item.total_installments }, (_, index) => index + 1).find((n) => !paidSet.has(n));
-        nextDueDate = nextOpenInstallment ? addMonths(item.start_date, nextOpenInstallment) : addMonths(item.start_date, item.total_installments);
-      }
-
-      return {
-        amount_paid: nextAmountPaid,
-        installments_paid: nextInstallmentsPaid,
-        due_date: nextDueDate,
-        status: paidOff ? "paid_off" : item.status === "renegotiated" ? "renegotiated" : "active",
-      };
-    },
-    [getTotal],
-  );
 
   const openPayModal = (installment: number | null) => {
     if (!debt) return;
-    const defaultValue = installment
-      ? debt.installment_amount || remaining
-      : debt.installment_amount || remaining;
+    // Última parcela absorve o resíduo de centavos: paga min(parcela, restante)
+    // pra a soma bater exatamente com o total e a dívida fechar (F3).
+    const defaultValue = debt.has_installments && debt.installment_amount
+      ? Math.min(debt.installment_amount, remaining > 0 ? remaining : debt.installment_amount)
+      : remaining > 0 ? remaining : debt.installment_amount || 0;
 
     setTargetInstallment(installment);
     setPayAmountDigits(toMoneyDigits(defaultValue));
@@ -351,22 +322,11 @@ const DebtDetailPage = () => {
     setPaying(true);
     setPayError(null);
 
-    const insertRes = await supabase.from("debt_payments").insert({
-      debt_id: debt.id,
-      amount,
-      date: parsed.data.date,
-      installment_number: targetInstallment,
-      notes: parsed.data.notes?.trim() || null,
-      user_id: user.id,
-      family_id: family.id,
-    });
-
-    if (insertRes.error) {
-      setPaying(false);
-      toast.error(insertRes.error.message || "Erro ao registrar pagamento");
-      return;
-    }
-
+    // Se uma conta foi escolhida, cria a transação bancária PRIMEIRO e guarda o
+    // id no pagamento (transaction_id), pra que excluir o pagamento reverta o
+    // saldo da conta (F19/F44). amount_paid/status/parcelas/due_date são
+    // recalculados pelo trigger debt_payments_recompute — sem update manual.
+    let transactionId: string | null = null;
     if (payAccountId !== "none") {
       const isReceiving = debt.direction === "they_owe";
       const txRes = await supabase.from("transactions").insert({
@@ -379,31 +339,31 @@ const DebtDetailPage = () => {
         status: "paid",
         account_id: payAccountId,
         notes: parsed.data.notes?.trim() || null,
-      });
-      if (txRes.error) {
-        toast.error("Pagamento registrado, mas falhou ao criar a transação na conta");
+      }).select("id").single();
+      if (txRes.error || !txRes.data) {
+        setPaying(false);
+        toast.error("Falha ao criar a transação na conta");
+        return;
       }
+      transactionId = txRes.data.id;
     }
 
-    const nextPayments = [
-      ...payments,
-      {
-        id: "tmp",
-        debt_id: debt.id,
-        amount,
-        date: parsed.data.date,
-        installment_number: targetInstallment,
-        notes: parsed.data.notes?.trim() || null,
-        created_at: null,
-      },
-    ];
+    const insertRes = await supabase.from("debt_payments").insert({
+      debt_id: debt.id,
+      amount,
+      date: parsed.data.date,
+      installment_number: targetInstallment,
+      notes: parsed.data.notes?.trim() || null,
+      user_id: user.id,
+      family_id: family.id,
+      transaction_id: transactionId,
+    });
 
-    const nextDebt = recalcDebtFromPayments(debt, nextPayments);
-    const updateRes = await supabase.from("debts").update(nextDebt).eq("id", debt.id);
     setPaying(false);
 
-    if (updateRes.error) {
-      toast.error(updateRes.error.message || "Erro ao atualizar dívida");
+    if (insertRes.error) {
+      if (transactionId) await supabase.from("transactions").delete().eq("id", transactionId);
+      toast.error(insertRes.error.message || "Erro ao registrar pagamento");
       return;
     }
 
@@ -416,20 +376,15 @@ const DebtDetailPage = () => {
     if (!debt || !deleteTarget) return;
 
     setDeleting(true);
-    const deleteRes = await supabase.from("debt_payments").delete().eq("id", deleteTarget.id);
-    if (deleteRes.error) {
-      setDeleting(false);
-      toast.error(deleteRes.error.message || "Erro ao excluir pagamento");
-      return;
+    // Reverte a transação bancária vinculada (F19/F44), se houver, antes de
+    // remover o pagamento. amount_paid/status/due_date recalculam via trigger.
+    if (deleteTarget.transaction_id) {
+      await supabase.from("transactions").delete().eq("id", deleteTarget.transaction_id);
     }
-
-    const nextPayments = payments.filter((payment) => payment.id !== deleteTarget.id);
-    const nextDebt = recalcDebtFromPayments(debt, nextPayments);
-    const updateRes = await supabase.from("debts").update(nextDebt).eq("id", debt.id);
+    const deleteRes = await supabase.from("debt_payments").delete().eq("id", deleteTarget.id);
     setDeleting(false);
-
-    if (updateRes.error) {
-      toast.error(updateRes.error.message || "Erro ao atualizar dívida");
+    if (deleteRes.error) {
+      toast.error(deleteRes.error.message || "Erro ao excluir pagamento");
       return;
     }
 

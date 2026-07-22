@@ -302,6 +302,7 @@ const SchedulePage = () => {
         .select("card_id, amount, date")
         .eq("type", "expense")
         .not("card_id", "is", null)
+        .neq("status", "paid")
         .gte("date", addDays(toISODate(monthStart), -45))
         .lte("date", addDays(toISODate(monthEnd), 45)),
     ]);
