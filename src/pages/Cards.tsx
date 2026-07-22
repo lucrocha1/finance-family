@@ -133,7 +133,9 @@ const CardsPage = () => {
     }
 
     setLoading(true);
-    const cardsRes = await supabase.from("cards").select("*").eq("family_id", family.id).order("name", { ascending: true });
+    // RLS (user_id = auth.uid()) já isola; filtrar por family_id escondia cartões
+    // com family_id defasado (ex.: criados antes de trocar de família).
+    const cardsRes = await supabase.from("cards").select("*").order("name", { ascending: true });
     if (cardsRes.error) {
       toast.error("Erro ao carregar cartões");
       setLoading(false);
@@ -303,6 +305,11 @@ const CardsPage = () => {
   const deleteCard = async () => {
     if (!editing) return;
     setDeleting(true);
+    // Desvincula as transações do cartão antes de excluí-lo: sem isso a FK
+    // bloquearia a exclusão (ou deixaria compras órfãs). Elas viram despesas
+    // avulsas (não afetam saldo — card_id e account_id nulos não entram no
+    // recompute de conta).
+    await supabase.from("transactions").update({ card_id: null }).eq("card_id", editing.id);
     const { error } = await supabase.from("cards").delete().eq("id", editing.id);
     setDeleting(false);
     if (error) {
@@ -419,7 +426,7 @@ const CardsPage = () => {
                   )}
                 </div>
 
-                <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/35 opacity-0 transition-opacity duration-200 group-hover:opacity-100">
+                <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/35 opacity-0 transition-opacity duration-200 group-hover:opacity-100 focus-within:opacity-100 max-[767px]:opacity-100">
                   <div className="pointer-events-auto flex gap-2">
                     <Button size="sm" className="h-9 rounded-lg px-4 text-xs font-semibold" onClick={() => navigate(`/cards/${card.id}`)}>Ver fatura</Button>
                     <Button size="sm" variant="outline" className="h-9 rounded-lg border-white/50 bg-transparent px-4 text-xs font-semibold text-white hover:bg-white/10" onClick={() => openEdit(card)}>

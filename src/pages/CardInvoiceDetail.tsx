@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, ChevronLeft, ChevronRight, CreditCard, Loader2 } from "lucide-react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
@@ -123,7 +123,7 @@ const CardInvoiceDetailPage = () => {
   const [loading, setLoading] = useState(true);
   const [card, setCard] = useState<CardRow | null>(null);
   const [selectedInvoiceMonth, setSelectedInvoiceMonth] = useState(() => startOfMonth(new Date()));
-  const [defaultedToOpen, setDefaultedToOpen] = useState(false);
+  const defaultedToOpen = useRef(false);
   const [categories, setCategories] = useState<CategoryRow[]>([]);
   const [transactions, setTransactions] = useState<TransactionRow[]>([]);
   const [history, setHistory] = useState<{ month: Date; total: number; status: "paid" | "open" }[]>([]);
@@ -155,10 +155,13 @@ const CardInvoiceDetailPage = () => {
 
     setLoading(true);
 
+    // Sem filtro de family_id: a RLS (user_id = auth.uid()) já isola. Filtrar por
+    // family_id escondia o próprio cartão/transações quando o family_id estava
+    // defasado — o cartão dava "não encontrado" e a fatura subestimava o total.
     const [cardRes, categoriesRes, accountsRes] = await Promise.all([
-      supabase.from("cards").select("*").eq("family_id", family.id).eq("id", id).maybeSingle(),
-      supabase.from("categories").select("id, name, color, type").eq("family_id", family.id).eq("type", "expense").order("name", { ascending: true }),
-      supabase.from("accounts").select("id, name").eq("family_id", family.id).order("name", { ascending: true }),
+      supabase.from("cards").select("*").eq("id", id).maybeSingle(),
+      supabase.from("categories").select("id, name, color, type").eq("type", "expense").order("name", { ascending: true }),
+      supabase.from("accounts").select("id, name").order("name", { ascending: true }),
     ]);
     setAccounts((accountsRes.data as Array<{ id: string; name: string }> | null) ?? []);
 
@@ -187,21 +190,26 @@ const CardInvoiceDetailPage = () => {
     // being filled). If today's day > closing_day, the open invoice
     // closes next month — so jump selectedInvoiceMonth forward.
     let invoiceMonth = selectedInvoiceMonth;
-    if (!defaultedToOpen) {
+    if (!defaultedToOpen.current) {
       const today = new Date();
       const closingDay = Number(currentCard.closing_day || 1);
-      if (today.getDate() > closingDay) {
+      // Mesma regra do helper canônico getOpenInvoiceWindow: closingDay clampado
+      // ao último dia do mês e comparação com ">=" (a compra do DIA do fechamento
+      // já entra na próxima fatura). Antes usava ">" sem clamp, então no dia do
+      // fechamento e em meses curtos (closing 29-31) a tela abria a fatura errada.
+      const lastDayThisMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
+      const effectiveClosing = Math.min(closingDay, lastDayThisMonth);
+      if (today.getDate() >= effectiveClosing) {
         invoiceMonth = startOfMonth(new Date(today.getFullYear(), today.getMonth() + 1, 1));
         setSelectedInvoiceMonth(invoiceMonth);
       }
-      setDefaultedToOpen(true);
+      defaultedToOpen.current = true;
     }
 
     const cycle = getCycleWindow(Number(currentCard.closing_day || 1), invoiceMonth);
     const txRes = await supabase
       .from("transactions")
       .select("id, description, amount, date, status, type, category_id, notes, categories(id, name, color)")
-      .eq("family_id", family.id)
       .eq("card_id", currentCard.id)
       .eq("type", "expense")
       .gte("date", cycle.start)
@@ -231,7 +239,6 @@ const CardInvoiceDetailPage = () => {
     const historyRes = await supabase
       .from("transactions")
       .select("amount, date, status")
-      .eq("family_id", family.id)
       .eq("card_id", currentCard.id)
       .eq("type", "expense")
       .gte("date", minStart)
@@ -255,7 +262,6 @@ const CardInvoiceDetailPage = () => {
     const spentTxsRes = await supabase
       .from("transactions")
       .select("card_id, amount, status, date, is_recurring, recurrence_parent_id, is_installment")
-      .eq("family_id", family.id)
       .eq("card_id", currentCard.id)
       .eq("type", "expense")
       .neq("status", "paid");
@@ -299,7 +305,7 @@ const CardInvoiceDetailPage = () => {
 
   const invoiceStatus = useMemo(() => {
     if (!transactions.length) return { label: "Aberta", className: "text-yellow-400" };
-    if (transactions.every((tx) => tx.status === "paid")) return { label: "Fechada", className: "text-emerald-500" };
+    if (transactions.every((tx) => tx.status === "paid")) return { label: "Paga", className: "text-emerald-500" };
     if (toISODate(new Date()) > toISODate(dueDate)) return { label: "Vencida", className: "text-destructive" };
     return { label: "Aberta", className: "text-yellow-400" };
   }, [dueDate, transactions]);
@@ -404,41 +410,22 @@ const CardInvoiceDetailPage = () => {
 
     setPaying(true);
 
-    // 1. Insert the bank-account-side payment as an expense (no card_id)
-    const { data: userData } = await supabase.auth.getUser();
-    const userId = userData?.user?.id;
-    if (!userId) {
-      setPaying(false);
-      toast.error("Sessão expirada");
-      return;
-    }
-
-    const { error: payError } = await supabase.from("transactions").insert({
-      family_id: family.id,
-      user_id: userId,
-      type: "expense",
-      description: `Pagamento Fatura — ${card.name} (${formatMonthYear(selectedInvoiceMonth)})`,
-      amount: amountValue,
-      date: payDate,
-      account_id: payAccountId,
-      card_id: null,
-      status: "paid",
+    // Pagamento ATOMICO via RPC: marca as compras como pagas E registra o
+    // "Pagamento Fatura" na mesma transação. Antes eram 2 writes separados — se
+    // o 2º falhava, a fatura ficava repagável e a conta era debitada em dobro.
+    const { error: payError } = await supabase.rpc("pay_card_invoice", {
+      p_family_id: family.id,
+      p_description: `Pagamento Fatura — ${card.name} (${formatMonthYear(selectedInvoiceMonth)})`,
+      p_amount: amountValue,
+      p_date: payDate,
+      p_account_id: payAccountId,
+      p_pending_ids: pendingIds,
     });
 
     if (payError) {
       setPaying(false);
       toast.error(payError.message || "Falha ao registrar pagamento");
       return;
-    }
-
-    // 2. Marca SOMENTE as transações pendentes desta fatura como pagas (libera o
-    //    limite do cartão). As já pagas não são re-tocadas.
-    const { error: updErr } = await supabase
-      .from("transactions")
-      .update({ status: "paid" })
-      .in("id", pendingIds);
-    if (updErr) {
-      toast.error("Pagamento criado, mas falhou ao marcar as compras como pagas");
     }
 
     setPaying(false);
@@ -482,11 +469,11 @@ const CardInvoiceDetailPage = () => {
       </div>
 
       <div className="flex items-center justify-center gap-2">
-        <Button variant="outline" size="icon" className="h-9 w-9 rounded-lg" onClick={() => setSelectedInvoiceMonth((prev) => startOfMonth(new Date(prev.getFullYear(), prev.getMonth() - 1, 1)))}>
+        <Button variant="outline" size="icon" aria-label="Fatura anterior" className="h-9 w-9 rounded-lg" onClick={() => setSelectedInvoiceMonth((prev) => startOfMonth(new Date(prev.getFullYear(), prev.getMonth() - 1, 1)))}>
           <ChevronLeft className="h-4 w-4" />
         </Button>
         <div className="min-w-[220px] text-center text-sm font-semibold text-foreground">Fatura de {formatMonthYear(selectedInvoiceMonth)}</div>
-        <Button variant="outline" size="icon" className="h-9 w-9 rounded-lg" onClick={() => setSelectedInvoiceMonth((prev) => startOfMonth(new Date(prev.getFullYear(), prev.getMonth() + 1, 1)))}>
+        <Button variant="outline" size="icon" aria-label="Próxima fatura" className="h-9 w-9 rounded-lg" onClick={() => setSelectedInvoiceMonth((prev) => startOfMonth(new Date(prev.getFullYear(), prev.getMonth() + 1, 1)))}>
           <ChevronRight className="h-4 w-4" />
         </Button>
         {pendingTotal > 0 && (
