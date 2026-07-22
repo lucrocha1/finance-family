@@ -34,6 +34,9 @@ type TxRow = {
   amount: number;
   type: string;
   date: string;
+  status: string | null;
+  card_id: string | null;
+  description: string | null;
   category_id: string | null;
   categories?: { id?: string; name?: string; color?: string | null } | { id?: string; name?: string; color?: string | null }[] | null;
 };
@@ -61,7 +64,10 @@ const isInvoicePayment = (tx: { card_id?: string | null; description?: string | 
 const getRangeFromPeriod = (period: PeriodOption, customFrom: string, customTo: string) => {
   const today = new Date();
   if (period === "custom") {
-    return { from: customFrom || toIso(startOfMonth(today)), to: customTo || toIso(today) };
+    const f = customFrom || toIso(startOfMonth(today));
+    const t = customTo || toIso(today);
+    // Se o usuário inverter as datas, troca em vez de retornar intervalo vazio.
+    return f <= t ? { from: f, to: t } : { from: t, to: f };
   }
 
   if (period === "month") return { from: toIso(startOfMonth(today)), to: toIso(endOfMonth(today)) };
@@ -71,17 +77,24 @@ const getRangeFromPeriod = (period: PeriodOption, customFrom: string, customTo: 
 };
 
 const ReportsPage = () => {
-  const { family, members } = useFamily();
+  const { family } = useFamily();
 
   const [period, setPeriod] = useState<PeriodOption>("6months");
   const [customFrom, setCustomFrom] = useState<string>(toIso(startOfMonth(new Date())));
   const [customTo, setCustomTo] = useState<string>(toIso(new Date()));
-  const [memberFilter, setMemberFilter] = useState("all");
   const [loading, setLoading] = useState(true);
   const [rows, setRows] = useState<TxRow[]>([]);
   const [hiddenTrendKeys, setHiddenTrendKeys] = useState<string[]>([]);
 
   const { from, to } = useMemo(() => getRangeFromPeriod(period, customFrom, customTo), [period, customFrom, customTo]);
+
+  // "Realizado" = pago OU despesa de cartão (que conta pela data da compra mesmo
+  // antes da fatura ser paga). Exclui pendentes NÃO-cartão (agendados/recorrências
+  // futuras), que não devem inflar receitas/despesas de um relatório do efetivado.
+  const realizedRows = useMemo(
+    () => rows.filter((tx) => tx.status === "paid" || Boolean(tx.card_id)),
+    [rows],
+  );
 
   useEffect(() => {
     if (!family?.id) {
@@ -92,23 +105,22 @@ const ReportsPage = () => {
 
     const load = async () => {
       setLoading(true);
-      let query = supabase
+      // Sem filtro de family_id: a RLS (user_id = auth.uid()) já isola por
+      // usuário. card_id/description são necessários pro guard de pagamento de
+      // fatura; status pra distinguir realizado de pendente.
+      const { data } = await supabase
         .from("transactions")
-        .select("id, family_id, user_id, amount, type, date, category_id, categories(id, name, color)")
-        .eq("family_id", family.id)
+        .select("id, family_id, user_id, amount, type, date, status, card_id, description, category_id, categories(id, name, color)")
         .gte("date", from)
         .lte("date", to)
         .order("date", { ascending: true });
 
-      if (memberFilter !== "all") query = query.eq("user_id", memberFilter);
-
-      const { data } = await query;
       setRows((data as TxRow[] | null) ?? []);
       setLoading(false);
     };
 
     void load();
-  }, [family?.id, from, to, memberFilter]);
+  }, [family?.id, from, to]);
 
   const monthly = useMemo<MonthSummary[]>(() => {
     const grouped = new Map<string, MonthSummary>();
@@ -123,7 +135,7 @@ const ReportsPage = () => {
       grouped.set(key, { key, label: monthLabel(key), income: 0, expense: 0, balance: 0 });
       cursor.setMonth(cursor.getMonth() + 1);
     }
-    rows.forEach((tx) => {
+    realizedRows.forEach((tx) => {
       const key = monthKey(tx.date);
       const row = grouped.get(key) ?? { key, label: monthLabel(key), income: 0, expense: 0, balance: 0 };
       if (tx.type === "income") row.income += Number(tx.amount || 0);
@@ -132,13 +144,13 @@ const ReportsPage = () => {
       grouped.set(key, row);
     });
     return [...grouped.values()].sort((a, b) => a.key.localeCompare(b.key));
-  }, [rows, from, to]);
+  }, [realizedRows, from, to]);
 
   const balanceEvolution = useMemo(() => {
     const dayDiff = Math.max(1, Math.floor((new Date(`${to}T00:00:00`).getTime() - new Date(`${from}T00:00:00`).getTime()) / 86400000));
     if (dayDiff <= 95) {
       const byDay = new Map<string, number>();
-      rows.forEach((tx) => {
+      realizedRows.forEach((tx) => {
         const delta = tx.type === "income" ? Number(tx.amount || 0) : tx.type === "expense" && !isInvoicePayment(tx) ? Number(tx.amount || 0) * -1 : 0;
         byDay.set(tx.date, (byDay.get(tx.date) ?? 0) + delta);
       });
@@ -154,11 +166,11 @@ const ReportsPage = () => {
       running += item.balance;
       return { label: item.label, saldo: running, rawDate: item.key };
     });
-  }, [rows, monthly, from, to]);
+  }, [realizedRows, monthly, from, to]);
 
   const categoryExpenses = useMemo(() => {
     const grouped = new Map<string, { id: string; category: string; color: string; value: number }>();
-    rows.filter((tx) => tx.type === "expense" && !isInvoicePayment(tx)).forEach((tx) => {
+    realizedRows.filter((tx) => tx.type === "expense" && !isInvoicePayment(tx)).forEach((tx) => {
       const cat = asSingle(tx.categories);
       const id = tx.category_id || cat?.id || "none";
       const entry = grouped.get(id) ?? {
@@ -174,24 +186,7 @@ const ReportsPage = () => {
     const total = [...grouped.values()].reduce((s, i) => s + i.value, 0);
     const items = [...grouped.values()].sort((a, b) => b.value - a.value).map((item, index) => ({ ...item, rank: index + 1, percent: total > 0 ? (item.value / total) * 100 : 0 }));
     return { total, items };
-  }, [rows]);
-
-  const memberExpenses = useMemo(() => {
-    const grouped = new Map<string, number>();
-    rows.filter((tx) => tx.type === "expense" && tx.user_id).forEach((tx) => {
-      if (!tx.user_id) return;
-      grouped.set(tx.user_id, (grouped.get(tx.user_id) ?? 0) + Number(tx.amount || 0));
-    });
-
-    return members
-      .map((m) => ({
-        id: m.user_id,
-        name: m.profiles?.full_name?.trim() || m.profiles?.email || "Usuário",
-        value: grouped.get(m.user_id) ?? 0,
-      }))
-      .filter((m) => m.value > 0)
-      .sort((a, b) => b.value - a.value);
-  }, [rows, members]);
+  }, [realizedRows]);
 
   const trendByCategory = useMemo(() => {
     const top5 = categoryExpenses.items.slice(0, 5);
@@ -202,8 +197,8 @@ const ReportsPage = () => {
       data: monthList.map((month) => {
         const base: Record<string, string | number> = { label: monthLabel(month), month };
         top5.forEach((cat) => {
-          const total = rows
-            .filter((tx) => tx.type === "expense" && monthKey(tx.date) === month)
+          const total = realizedRows
+            .filter((tx) => tx.type === "expense" && !isInvoicePayment(tx) && monthKey(tx.date) === month)
             .filter((tx) => {
               const c = asSingle(tx.categories);
               const id = tx.category_id || c?.id || "none";
@@ -215,29 +210,26 @@ const ReportsPage = () => {
         return base;
       }),
     };
-  }, [categoryExpenses.items, monthly, rows]);
+  }, [categoryExpenses.items, monthly, realizedRows]);
 
   const monthlyComparison = useMemo(() => {
+    // O mês corrente está incompleto — comparar seu gasto parcial com o mês
+    // anterior (completo) engana. Anulamos a variação e marcamos "em andamento".
+    const ongoingKey = toIso(new Date()).slice(0, 7);
     return monthly.map((item, index) => {
       const prev = monthly[index - 1];
-      const variation = !prev || prev.expense === 0 ? null : ((item.expense - prev.expense) / prev.expense) * 100;
-      const currentMonth = monthKey(to) === item.key;
-      return { ...item, variation, currentMonth };
+      const isOngoing = item.key === ongoingKey;
+      const variation = !prev || prev.expense === 0 || isOngoing ? null : ((item.expense - prev.expense) / prev.expense) * 100;
+      return { ...item, variation, currentMonth: isOngoing };
     });
-  }, [monthly, to]);
+  }, [monthly]);
 
   const sectionHasData = {
     incomeExpense: monthly.length > 0,
     balanceEvolution: balanceEvolution.length > 0,
     categories: categoryExpenses.items.length > 0,
-    memberExpenses: memberExpenses.length > 0,
     trends: trendByCategory.data.length > 0 && trendByCategory.keys.length > 0,
     comparison: monthlyComparison.length > 0,
-  };
-
-  const memberName = (userId: string) => {
-    const member = members.find((m) => m.user_id === userId);
-    return member?.profiles?.full_name?.trim() || member?.profiles?.email || "Membro";
   };
 
   return (
@@ -246,10 +238,10 @@ const ReportsPage = () => {
         <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
           <div>
             <h1 className="text-2xl font-bold text-foreground">Relatórios</h1>
-            <p className="text-sm text-muted-foreground">Visão analítica das finanças por período e membro.</p>
+            <p className="text-sm text-muted-foreground">Visão analítica das suas finanças por período.</p>
           </div>
 
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="space-y-1">
               <Label>Período</Label>
               <Select value={period} onValueChange={(v) => setPeriod(v as PeriodOption)}>
@@ -266,32 +258,15 @@ const ReportsPage = () => {
               </Select>
             </div>
 
-            <div className="space-y-1">
-              <Label>Membro</Label>
-              <Select value={memberFilter} onValueChange={setMemberFilter}>
-                <SelectTrigger className="w-full min-w-[190px]">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Todos</SelectItem>
-                  {members.map((member) => (
-                    <SelectItem key={member.user_id} value={member.user_id}>
-                      {member.profiles?.full_name?.trim() || member.profiles?.email || "Membro"}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
             {period === "custom" ? (
               <div className="grid grid-cols-2 gap-2">
                 <div className="space-y-1">
                   <Label>De</Label>
-                  <Input type="date" value={customFrom} onChange={(e) => setCustomFrom(e.target.value)} />
+                  <Input type="date" value={customFrom} max={customTo} onChange={(e) => setCustomFrom(e.target.value)} />
                 </div>
                 <div className="space-y-1">
                   <Label>Até</Label>
-                  <Input type="date" value={customTo} onChange={(e) => setCustomTo(e.target.value)} />
+                  <Input type="date" value={customTo} min={customFrom} onChange={(e) => setCustomTo(e.target.value)} />
                 </div>
               </div>
             ) : null}
@@ -366,7 +341,7 @@ const ReportsPage = () => {
 
       <Card className="rounded-xl border-border bg-card">
         <CardHeader>
-          <CardTitle className="text-lg font-bold text-foreground">Evolução do Saldo</CardTitle>
+          <CardTitle className="text-lg font-bold text-foreground">Fluxo acumulado no período</CardTitle>
         </CardHeader>
         <CardContent>
           {!sectionHasData.balanceEvolution ? (
@@ -437,36 +412,6 @@ const ReportsPage = () => {
                   </div>
                 ))}
               </div>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      <Card className="rounded-xl border-border bg-card">
-        <CardHeader>
-          <CardTitle className="text-lg font-bold text-foreground">Gastos por Membro da Família</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {!sectionHasData.memberExpenses ? (
-            <EmptySection loading={loading} />
-          ) : (
-            <div className="h-[300px] w-full">
-              <ResponsiveContainer>
-                <BarChart data={memberExpenses} layout="vertical" margin={{ left: 16, right: 24 }}>
-                  <CartesianGrid stroke="hsl(var(--border))" strokeDasharray="3 3" />
-                  <XAxis type="number" stroke="hsl(var(--muted-foreground))" tickFormatter={(v) => ptCurrency.format(v)} />
-                  <YAxis type="category" dataKey="name" width={120} stroke="hsl(var(--muted-foreground))" />
-                  <Tooltip
-                    contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: "0.75rem", color: "hsl(var(--foreground))" }}
-                    formatter={(v: number) => [ptCurrency.format(v), "Despesas"]}
-                  />
-                  <Bar dataKey="value" radius={[0, 6, 6, 0]}>
-                    {memberExpenses.map((m) => (
-                      <Cell key={m.id} fill={m.id === memberFilter ? "hsl(var(--accent))" : "hsl(var(--muted-foreground))"} />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
             </div>
           )}
         </CardContent>
@@ -561,7 +506,6 @@ const ReportsPage = () => {
 
       <p className="text-xs text-muted-foreground">
         Período ativo: {dateFmt.format(new Date(`${from}T00:00:00`))} até {dateFmt.format(new Date(`${to}T00:00:00`))}
-        {memberFilter !== "all" ? ` • ${memberName(memberFilter)}` : ""}
       </p>
     </div>
   );
