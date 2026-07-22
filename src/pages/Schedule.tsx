@@ -58,6 +58,7 @@ type ScheduledRow = {
   created_at: string | null;
   source?: "scheduled" | "transaction" | "debt" | "card_closing" | "card_due";
   source_id?: string;
+  transfer_group_id?: string | null;
 };
 
 // Tipos de evento — legenda do calendário + cor das pills.
@@ -66,7 +67,6 @@ const EVENT_KINDS = [
   { key: "payable", label: "A Pagar", color: "#ef4444" },
   { key: "debt", label: "Dívida", color: "#eab308" },
   { key: "invoice", label: "Fatura", color: "#8b5cf6" },
-  { key: "task", label: "Compromisso", color: "#38bdf8" },
 ] as const;
 const KIND_COLOR: Record<string, string> = Object.fromEntries(EVENT_KINDS.map((k) => [k.key, k.color]));
 
@@ -223,7 +223,29 @@ const normalizeRecurrence = (row: ScheduledRow): RecurrenceType => {
   return "once";
 };
 const isPaid = (row: ScheduledRow) => Boolean(row.is_paid) || row.status === "paid";
-const isOverdue = (row: ScheduledRow) => !isPaid(row) && row.due_date < todayIso();
+
+// Mapeia uma transação pendente (não-cartão) para a linha da agenda.
+const mapPendingTx = (t: Record<string, unknown>): ScheduledRow => ({
+  id: `tx-${t.id}`,
+  description: (t.description as string) ?? "Transação pendente",
+  amount: Number(t.amount ?? 0),
+  due_date: String(t.date ?? ""),
+  type: (t.type as string) === "income" ? "receivable" : "payable",
+  recurrence: "once",
+  recurrence_type: "once",
+  category_id: (t.category_id as string | null) ?? null,
+  status: "pending",
+  is_paid: false,
+  paid_at: null,
+  created_at: null,
+  source: "transaction",
+  source_id: String(t.id),
+  transfer_group_id: (t.transfer_group_id as string | null) ?? null,
+});
+const TX_SELECT = "id, description, amount, date, type, status, category_id, transfer_group_id";
+// Eventos informativos (type "info", ex.: fechamento de fatura) nunca são
+// "atrasados" — não representam um pagamento a fazer.
+const isOverdue = (row: ScheduledRow) => !isPaid(row) && row.type !== "info" && row.due_date < todayIso();
 
 const SchedulePage = () => {
   const { family } = useFamily();
@@ -276,7 +298,7 @@ const SchedulePage = () => {
     // Keeping a redundant .eq("family_id", family.id) hides rows whose
     // family_id drifted from the current FamilyContext, so we drop it
     // across all queries.
-    const [monthRes, dayRes, overdueRes, next7Res, categoriesRes, txMonthRes, debtsMonthRes, cardsRes, cardTxRes] = await Promise.all([
+    const [monthRes, dayRes, overdueRes, next7Res, categoriesRes, txMonthRes, debtsMonthRes, cardsRes, cardTxRes, txOverdueRes, txNext7Res, cardTxTodayRes] = await Promise.all([
       supabase
         .from("scheduled_payments")
         .select("*, categories(id, name, color, type)")
@@ -300,7 +322,7 @@ const SchedulePage = () => {
       supabase.from("categories").select("id, name, color, type").order("name", { ascending: true }),
       supabase
         .from("transactions")
-        .select("id, description, amount, date, type, status, category_id")
+        .select(TX_SELECT)
         .eq("status", "pending")
         .is("card_id", null)
         .gte("date", toISODate(monthStart))
@@ -320,6 +342,30 @@ const SchedulePage = () => {
         .neq("status", "paid")
         .gte("date", addDays(toISODate(monthStart), -45))
         .lte("date", addDays(toISODate(monthEnd), 45)),
+      // Atrasados e Próximos 7 são relativos a HOJE (globais), independentes do
+      // mês visualizado — senão navegar o calendário escondia transações
+      // atrasadas de meses anteriores e faturas do ciclo atual.
+      supabase
+        .from("transactions")
+        .select(TX_SELECT)
+        .eq("status", "pending")
+        .is("card_id", null)
+        .lt("date", todayIso()),
+      supabase
+        .from("transactions")
+        .select(TX_SELECT)
+        .eq("status", "pending")
+        .is("card_id", null)
+        .gte("date", todayIso())
+        .lte("date", nextWeek),
+      supabase
+        .from("transactions")
+        .select("card_id, amount, date")
+        .eq("type", "expense")
+        .not("card_id", "is", null)
+        .neq("status", "paid")
+        .gte("date", addDays(todayIso(), -75))
+        .lte("date", addDays(todayIso(), 45)),
     ]);
 
     if (monthRes.error || dayRes.error || overdueRes.error || next7Res.error || categoriesRes.error) {
@@ -328,22 +374,9 @@ const SchedulePage = () => {
       return;
     }
 
-    const txAsScheduled: ScheduledRow[] = ((txMonthRes.data ?? []) as Array<Record<string, unknown>>).map((t) => ({
-      id: `tx-${t.id}`,
-      description: (t.description as string) ?? "Transação pendente",
-      amount: Number(t.amount ?? 0),
-      due_date: String(t.date ?? ""),
-      type: (t.type as string) === "income" ? "receivable" : "payable",
-      recurrence: "once",
-      recurrence_type: "once",
-      category_id: (t.category_id as string | null) ?? null,
-      status: "pending",
-      is_paid: false,
-      paid_at: null,
-      created_at: null,
-      source: "transaction",
-      source_id: String(t.id),
-    }));
+    const txAsScheduled: ScheduledRow[] = ((txMonthRes.data ?? []) as Array<Record<string, unknown>>).map(mapPendingTx);
+    const txOverdue: ScheduledRow[] = ((txOverdueRes.data ?? []) as Array<Record<string, unknown>>).map(mapPendingTx);
+    const txNext7: ScheduledRow[] = ((txNext7Res.data ?? []) as Array<Record<string, unknown>>).map(mapPendingTx);
 
     // Expand parceled debts into one event per installment (start_date
     // + n months). Non-parceled debts get a single event at due_date.
@@ -385,15 +418,12 @@ const SchedulePage = () => {
       const installmentAmount = Number(d.installment_amount ?? 0);
       const startIso = String(d.start_date ?? "");
       if (!startIso) return [];
-      const start = new Date(`${startIso}T00:00:00`);
       const out: ScheduledRow[] = [];
       for (let i = 0; i < totalInstallments; i++) {
-        const due = new Date(start);
         // Parcela 1 vence start + 1 mês (mesma convenção do DebtDetail e do
-        // trigger). Antes usava start + i, deixando a parcela 1 no start_date e
-        // divergindo 1 mês do detalhe.
-        due.setMonth(due.getMonth() + i + 1);
-        const dueIso = toISODate(due);
+        // trigger), com clamp de fim de mês via addMonths — setMonth cru
+        // estourava para o mês seguinte quando start_date era dia 29-31.
+        const dueIso = addMonths(startIso, i + 1);
         const number = i + 1;
         const isPaidParcel = number <= installmentsPaid;
         out.push({
@@ -418,13 +448,16 @@ const SchedulePage = () => {
 
     const cardsList = ((cardsRes.data ?? []) as Array<{ id: string; name: string; closing_day: number | null; due_day: number | null }>);
     const cardTxs = ((cardTxRes.data ?? []) as Array<{ card_id: string | null; amount: number; date: string }>);
+    const cardTxToday = ((cardTxTodayRes.data ?? []) as Array<{ card_id: string | null; amount: number; date: string }>);
     const cardEvents = buildCardEvents(cardsList, cardTxs, monthStart, monthEnd);
     // Compute window for each list separately
     const todayDate = new Date();
     const next7DateEnd = new Date(todayDate);
     next7DateEnd.setDate(next7DateEnd.getDate() + 8);
-    const cardEventsOverdue = buildCardEvents(cardsList, cardTxs, new Date(todayDate.getFullYear(), todayDate.getMonth() - 1, 1), new Date(todayDate.getFullYear(), todayDate.getMonth(), todayDate.getDate() - 1));
-    const cardEventsNext7 = buildCardEvents(cardsList, cardTxs, todayDate, next7DateEnd);
+    // Atrasados/Próximos 7 usam compras ancoradas em HOJE (cardTxToday), não na
+    // janela do mês visualizado — senão as faturas sumiam ao navegar o calendário.
+    const cardEventsOverdue = buildCardEvents(cardsList, cardTxToday, new Date(todayDate.getFullYear(), todayDate.getMonth() - 1, 1), new Date(todayDate.getFullYear(), todayDate.getMonth(), todayDate.getDate() - 1));
+    const cardEventsNext7 = buildCardEvents(cardsList, cardTxToday, todayDate, next7DateEnd);
 
     const monthStartIso = toISODate(monthStart);
     const monthEndIso = toISODate(monthEnd);
@@ -436,18 +469,22 @@ const SchedulePage = () => {
       ...debtsAsScheduled.filter((r) => r.due_date === selectedDate),
       ...cardEvents.filter((r) => r.due_date === selectedDate),
     ];
+    // Atrasados e Próximos 7: transações vêm das queries GLOBAIS (txOverdue/
+    // txNext7), não do recorte do mês. O .filter(!isPaid) final tira parcelas de
+    // dívida já quitadas e compromissos marcados só no status. Eventos de
+    // fechamento (card_closing) são informativos e ficam de fora (só card_due).
     const overdueRows = [
       ...((overdueRes.data as ScheduledRow[] | null) ?? []),
-      ...txAsScheduled.filter((r) => r.due_date < todayIso()),
+      ...txOverdue,
       ...debtsAsScheduled.filter((r) => r.due_date < todayIso()),
       ...cardEventsOverdue.filter((r) => r.source === "card_due" && r.due_date < todayIso()),
-    ];
+    ].filter((r) => !isPaid(r));
     const next7Rows = [
       ...((next7Res.data as ScheduledRow[] | null) ?? []),
-      ...txAsScheduled.filter((r) => r.due_date >= todayIso() && r.due_date <= nextWeek),
+      ...txNext7,
       ...debtsAsScheduled.filter((r) => r.due_date >= todayIso() && r.due_date <= nextWeek),
-      ...cardEventsNext7.filter((r) => r.due_date >= todayIso() && r.due_date <= nextWeek),
-    ];
+      ...cardEventsNext7.filter((r) => r.source === "card_due" && r.due_date >= todayIso() && r.due_date <= nextWeek),
+    ].filter((r) => !isPaid(r));
 
     setMonthRows(monthRows);
     setDayRows(dayRows);
@@ -477,8 +514,11 @@ const SchedulePage = () => {
   }, [dayRows]);
 
   const monthSummary = useMemo(() => {
-    const payable = monthRows.filter((row) => normalizeType(row.type) === "payable" && !isPaid(row)).reduce((sum, row) => sum + Number(row.amount || 0), 0);
-    const receivable = monthRows.filter((row) => normalizeType(row.type) === "receivable" && !isPaid(row)).reduce((sum, row) => sum + Number(row.amount || 0), 0);
+    // row.type !== "info": o evento de FECHAMENTO de fatura é informativo e tem o
+    // mesmo valor do vencimento; sem excluí-lo, a fatura era contada em dobro em
+    // "A pagar este mês" (normalizeType("info") caía em "payable").
+    const payable = monthRows.filter((row) => row.type !== "info" && normalizeType(row.type) === "payable" && !isPaid(row)).reduce((sum, row) => sum + Number(row.amount || 0), 0);
+    const receivable = monthRows.filter((row) => row.type !== "info" && normalizeType(row.type) === "receivable" && !isPaid(row)).reduce((sum, row) => sum + Number(row.amount || 0), 0);
     return {
       payable,
       receivable,
@@ -619,9 +659,12 @@ const SchedulePage = () => {
       type: parsed.data.type,
       recurrence: parsed.data.recurrence,
       category_id: parsed.data.categoryId === "none" ? null : parsed.data.categoryId,
-      status: "pending",
-      is_paid: false,
-      paid_at: null,
+      // Ao editar, preserva o estado de pagamento — antes toda edição de um
+      // compromisso já pago o revertia para pendente (status/is_paid/paid_at
+      // fixos), fazendo sumir o "Pago ✓" e reabrir risco de pagar de novo.
+      status: editing ? (editing.status ?? "pending") : "pending",
+      is_paid: editing ? Boolean(editing.is_paid) : false,
+      paid_at: editing ? editing.paid_at : null,
     };
 
     const result = editing
@@ -658,6 +701,17 @@ const SchedulePage = () => {
 
     const nextDue = recurrenceType === "weekly" ? addDays(row.due_date, 7) : recurrenceType === "monthly" ? addMonths(row.due_date, 1) : addYears(row.due_date, 1);
 
+    // Evita duplicar: marcar -> desfazer -> marcar não deve criar 2 ocorrências.
+    // Se já existe um compromisso igual naquela data, não cria de novo.
+    const existing = await supabase
+      .from("scheduled_payments")
+      .select("id")
+      .eq("description", row.description)
+      .eq("due_date", nextDue)
+      .eq("type", normalizeType(row.type))
+      .limit(1);
+    if (existing.data && existing.data.length > 0) return nextDue;
+
     const createRes = await insertPayment({
       description: row.description,
       amount: row.amount,
@@ -682,7 +736,12 @@ const SchedulePage = () => {
 
   const togglePaid = async (row: ScheduledRow) => {
     if (row.source === "transaction" && row.source_id) {
-      const { error } = await supabase.from("transactions").update({ status: "paid" }).eq("id", row.source_id);
+      // Transferência: marca as DUAS pernas (mesmo transfer_group_id), senão o
+      // efeito no saldo seria aplicado de um lado só.
+      const base = supabase.from("transactions").update({ status: "paid" });
+      const { error } = row.transfer_group_id
+        ? await base.eq("transfer_group_id", row.transfer_group_id)
+        : await base.eq("id", row.source_id);
       if (error) toast.error("Não foi possível marcar como paga");
       else {
         toast.success("Transação marcada como paga");
@@ -692,6 +751,13 @@ const SchedulePage = () => {
     }
     if (row.source === "debt") {
       navigate(`/debts/${row.source_id}`);
+      return;
+    }
+    // Eventos de cartão não vivem em scheduled_payments (id sintético); o
+    // pagamento da fatura é feito na tela do cartão. Antes caíam no update com
+    // id inválido e davam erro.
+    if (row.source === "card_closing" || row.source === "card_due") {
+      navigate(`/cards/${row.source_id}`);
       return;
     }
     const currentlyPaid = isPaid(row);
@@ -831,9 +897,7 @@ const SchedulePage = () => {
                             ? "invoice"
                             : normalizeType(row.type) === "receivable"
                               ? "receivable"
-                              : normalizeType(row.type) === "payable"
-                                ? "payable"
-                                : "task";
+                              : "payable";
                       const color = KIND_COLOR[kind];
                       const paid = isPaid(row);
                       const overdue = isOverdue(row);
@@ -935,6 +999,11 @@ const SchedulePage = () => {
                   const overdue = isOverdue(row);
                   const category = asSingle(row.categories);
                   const rec = normalizeRecurrence(row);
+                  // Só compromissos manuais (scheduled_payments) podem ser
+                  // editados/excluídos aqui; linhas agregadas (transação, dívida,
+                  // fatura) têm id sintético e devem abrir a tela de origem.
+                  const isManaged = !row.source || row.source === "scheduled";
+                  const isInfo = row.source === "card_closing";
 
                   return (
                     <div key={row.id} className="rounded-lg border p-4" style={{ backgroundColor: "#0d0d14", borderColor: "#1e1e2e", borderLeftWidth: 3, borderLeftColor: rowType === "payable" ? "#ef4444" : "#22c55e" }}>
@@ -973,15 +1042,23 @@ const SchedulePage = () => {
                           )}
 
                           <div className="mt-2 flex justify-end gap-1">
-                            <Button size="sm" className="h-7 rounded-md px-2 text-xs" variant={paid ? "ghost" : "default"} onClick={() => togglePaid(row)}>
-                              {paid ? "Desfazer" : normalizeType(row.type) === "receivable" ? "Marcar recebido" : "Marcar como pago"}
-                            </Button>
-                            <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => openEdit(row)}>
-                              <Pencil className="h-4 w-4" />
-                            </Button>
-                            <Button size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground hover:text-destructive" onClick={() => setDeleteTarget(row)}>
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
+                            {!isInfo && (
+                              <Button size="sm" className="h-7 rounded-md px-2 text-xs" variant={paid ? "ghost" : "default"} onClick={() => togglePaid(row)}>
+                                {row.source === "debt" || row.source === "card_due"
+                                  ? "Ver"
+                                  : paid ? "Desfazer" : rowType === "receivable" ? "Marcar recebido" : "Marcar como pago"}
+                              </Button>
+                            )}
+                            {isManaged && (
+                              <>
+                                <Button size="icon" variant="ghost" className="h-7 w-7" aria-label="Editar compromisso" onClick={() => openEdit(row)}>
+                                  <Pencil className="h-4 w-4" />
+                                </Button>
+                                <Button size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground hover:text-destructive" aria-label="Excluir compromisso" onClick={() => setDeleteTarget(row)}>
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </>
+                            )}
                           </div>
                         </div>
                       </div>
