@@ -112,6 +112,56 @@ const parseLine = (line: string, delimiter: string) => {
   return values;
 };
 
+// Parser CSV que respeita aspas ATRAVÉS de quebras de linha (um campo entre
+// aspas pode conter \n). Antes, o texto era quebrado por linha ANTES de tratar
+// aspas, desalinhando as colunas de qualquer linha com \n embutido (F37).
+const parseCsv = (text: string, delimiter: string): string[][] => {
+  const rows: string[][] = [];
+  let field = "";
+  let row: string[] = [];
+  let inQuotes = false;
+  const pushField = () => {
+    row.push(field.trim());
+    field = "";
+  };
+  const pushRow = () => {
+    pushField();
+    if (row.some((cell) => cell !== "")) rows.push(row);
+    row = [];
+  };
+  for (let i = 0; i < text.length; i += 1) {
+    const char = text[i];
+    const next = text[i + 1];
+    if (inQuotes) {
+      if (char === '"' && next === '"') {
+        field += '"';
+        i += 1;
+      } else if (char === '"') {
+        inQuotes = false;
+      } else {
+        field += char;
+      }
+      continue;
+    }
+    if (char === '"') {
+      inQuotes = true;
+      continue;
+    }
+    if (char === delimiter) {
+      pushField();
+      continue;
+    }
+    if (char === "\r") continue;
+    if (char === "\n") {
+      pushRow();
+      continue;
+    }
+    field += char;
+  }
+  if (field.length > 0 || row.length > 0) pushRow();
+  return rows;
+};
+
 const detectDelimiter = (text: string) => {
   const sample = text.split(/\r?\n/).filter(Boolean).slice(0, 8);
   const candidates = [",", ";", "\t", "|"];
@@ -210,6 +260,7 @@ const ImportCsvPage = () => {
   const [loading, setLoading] = useState(false);
 
   const [accounts, setAccounts] = useState<AccountRow[]>([]);
+  const [categories, setCategories] = useState<{ id: string; name: string }[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState("");
 
   const [file, setFile] = useState<File | null>(null);
@@ -232,17 +283,22 @@ const ImportCsvPage = () => {
 
   const rowsRaw = useMemo(() => {
     if (!csvText.trim()) return [] as string[][];
-    const lines = csvText.split(/\r?\n/).filter((line) => line.trim().length > 0);
-    return lines.map((line) => parseLine(line, delimiter));
+    return parseCsv(csvText, delimiter);
   }, [csvText, delimiter]);
 
   const columnNames = useMemo(() => {
     if (!rowsRaw.length) return [] as string[];
-    if (firstRowHeader) {
-      return rowsRaw[0].map((value, index) => normalizeHeader(value, index));
-    }
-    const maxCols = Math.max(...rowsRaw.map((row) => row.length));
-    return Array.from({ length: maxCols }, (_, idx) => `Coluna ${idx + 1}`);
+    const base = firstRowHeader
+      ? rowsRaw[0].map((value, index) => normalizeHeader(value, index))
+      : Array.from({ length: Math.max(...rowsRaw.map((row) => row.length)) }, (_, idx) => `Coluna ${idx + 1}`);
+    // Desambigua cabeçalhos repetidos (ex.: duas colunas "Valor") pra o
+    // mapeamento por nome selecionar a coluna certa, não sempre a 1ª (F38).
+    const seen = new Map<string, number>();
+    return base.map((name) => {
+      const count = seen.get(name) ?? 0;
+      seen.set(name, count + 1);
+      return count === 0 ? name : `${name} (${count + 1})`;
+    });
   }, [rowsRaw, firstRowHeader]);
 
   const dataRows = useMemo(() => {
@@ -392,13 +448,14 @@ const ImportCsvPage = () => {
     if (!family?.id) return;
 
     setLoading(true);
-    const [accountsRes, historyRes] = await Promise.all([
+    const [accountsRes, historyRes, categoriesRes] = await Promise.all([
       supabase.from("accounts").select("id, name, institution").eq("family_id", family.id).order("name", { ascending: true }),
       supabase
         .from("csv_imports")
         .select("id, created_at, filename, status, rows_imported, rows_total, account_id")
         .eq("family_id", family.id)
         .order("created_at", { ascending: false }),
+      supabase.from("categories").select("id, name").eq("family_id", family.id),
     ]);
 
     if (accountsRes.error) toast.error("Erro ao carregar contas");
@@ -406,6 +463,7 @@ const ImportCsvPage = () => {
 
     setAccounts((accountsRes.data as AccountRow[] | null) ?? []);
     setHistory((historyRes.data as CsvImportRow[] | null) ?? []);
+    setCategories((categoriesRes.data as { id: string; name: string }[] | null) ?? []);
     setLoading(false);
   }, [family?.id]);
 
@@ -524,12 +582,18 @@ const ImportCsvPage = () => {
       return;
     }
 
+    // Resolve a categoria mapeada (categoryName -> category_id), case-insensitive.
+    // Antes, a coluna Categoria era mapeada e parseada mas descartada no insert,
+    // então o usuário achava que categorizava e as transações entravam sem
+    // categoria (F32). Sem correspondência, entra sem categoria.
+    const categoryByName = new Map(categories.map((c) => [c.name.trim().toLowerCase(), c.id]));
     const payload = dedupedRows.map((row) => ({
       description: row.description,
       amount: row.amount,
       type: row.type,
       date: row.date,
       account_id: selectedAccountId,
+      category_id: row.categoryName ? categoryByName.get(row.categoryName.trim().toLowerCase()) ?? null : null,
       status: "paid",
       user_id: user.id,
       family_id: family.id,

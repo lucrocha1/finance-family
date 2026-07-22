@@ -87,3 +87,53 @@ self.addEventListener("notificationclick", (event) => {
     }),
   );
 });
+
+// ---- Push subscription rotation (F51) ----
+// Quando o navegador rotaciona/expira a subscription, re-inscreve e persiste o
+// novo endpoint via edge function (o SW não tem sessão Supabase). Sem isso, o
+// endpoint antigo era deletado (410 pelo send-push) e o novo nunca chegava ao
+// banco, então o usuário parava de receber push silenciosamente até reativar.
+const VAPID_PUBLIC_KEY = import.meta.env.VITE_VAPID_PUBLIC_KEY as string | undefined;
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string | undefined;
+const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
+
+const urlBase64ToUint8Array = (base64String: string) => {
+  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+  const raw = atob(base64);
+  const arr = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i += 1) arr[i] = raw.charCodeAt(i);
+  return arr;
+};
+
+self.addEventListener("pushsubscriptionchange", (event) => {
+  const evt = event as ExtendableEvent & { oldSubscription?: PushSubscription };
+  evt.waitUntil(
+    (async () => {
+      if (!VAPID_PUBLIC_KEY || !SUPABASE_URL) return;
+      const oldEndpoint = evt.oldSubscription?.endpoint;
+      try {
+        const sub = await self.registration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
+        });
+        const data = sub.toJSON();
+        await fetch(`${SUPABASE_URL}/functions/v1/rotate-push-subscription`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(SUPABASE_ANON_KEY ? { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` } : {}),
+          },
+          body: JSON.stringify({
+            old_endpoint: oldEndpoint,
+            endpoint: sub.endpoint,
+            p256dh: data.keys?.p256dh,
+            auth: data.keys?.auth,
+          }),
+        });
+      } catch {
+        /* best-effort — o usuário pode reativar push nas Configurações */
+      }
+    })(),
+  );
+});

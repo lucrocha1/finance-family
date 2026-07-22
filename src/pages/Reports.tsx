@@ -112,6 +112,17 @@ const ReportsPage = () => {
 
   const monthly = useMemo<MonthSummary[]>(() => {
     const grouped = new Map<string, MonthSummary>();
+    // Semeia TODOS os meses do intervalo [from, to] com zero, pra a série não ter
+    // buracos — assim o comparativo mês-a-mês sempre compara meses consecutivos,
+    // não pula um mês vazio (F63).
+    const end = new Date(`${to}T00:00:00`);
+    const cursor = new Date(`${from}T00:00:00`);
+    cursor.setDate(1);
+    while (cursor <= end) {
+      const key = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, "0")}`;
+      grouped.set(key, { key, label: monthLabel(key), income: 0, expense: 0, balance: 0 });
+      cursor.setMonth(cursor.getMonth() + 1);
+    }
     rows.forEach((tx) => {
       const key = monthKey(tx.date);
       const row = grouped.get(key) ?? { key, label: monthLabel(key), income: 0, expense: 0, balance: 0 };
@@ -121,7 +132,7 @@ const ReportsPage = () => {
       grouped.set(key, row);
     });
     return [...grouped.values()].sort((a, b) => a.key.localeCompare(b.key));
-  }, [rows]);
+  }, [rows, from, to]);
 
   const balanceEvolution = useMemo(() => {
     const dayDiff = Math.max(1, Math.floor((new Date(`${to}T00:00:00`).getTime() - new Date(`${from}T00:00:00`).getTime()) / 86400000));

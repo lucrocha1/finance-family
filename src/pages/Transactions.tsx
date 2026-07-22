@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowDown,
   ArrowLeftRight,
@@ -135,6 +135,7 @@ const TransactionsPage = () => {
   const [selectedMonth, setSelectedMonth] = useState(() => startOfMonth(new Date()));
   const [loading, setLoading] = useState(true);
   const [transactions, setTransactions] = useState<TransactionRow[]>([]);
+  const loadSeqRef = useRef(0);
   const [categories, setCategories] = useState<CategoryRow[]>([]);
   const [accounts, setAccounts] = useState<AccountRow[]>([]);
   const [cards, setCards] = useState<CardRow[]>([]);
@@ -196,6 +197,7 @@ const TransactionsPage = () => {
   const { version: recurrenceVersion } = useEnsureRecurrencesUpTo(monthEnd);
 
   const loadData = useCallback(async () => {
+    const seq = ++loadSeqRef.current;
     if (!family?.id) {
       setTransactions([]);
       setCategories([]);
@@ -273,6 +275,12 @@ const TransactionsPage = () => {
       console.warn("[Transactions] cards query failed:", cardsRes.error);
     }
 
+    // Guarda de corrida (F43): se uma navegação de mês mais recente começou
+    // enquanto este fetch estava em voo, descarta este resultado — senão a
+    // resposta antiga sobrescreveria os dados do mês atual (respostas fora de
+    // ordem ao clicar rápido em > entre meses).
+    if (seq !== loadSeqRef.current) return;
+
     if (txRes.error) {
       const fallback = await supabase
         .from("transactions")
@@ -280,6 +288,7 @@ const TransactionsPage = () => {
         .gte("date", toISODate(monthStart))
         .lte("date", toISODate(monthEnd))
         .order("date", { ascending: false });
+      if (seq !== loadSeqRef.current) return;
       setTransactions((fallback.data as TransactionRow[] | null) ?? []);
     } else {
       setTransactions((txRes.data as TransactionRow[] | null) ?? []);

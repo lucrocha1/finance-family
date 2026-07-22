@@ -115,6 +115,7 @@ const endOfWeekSunday = (base: Date) => {
 };
 
 const formatCompactBRL = (value: number) => {
+  if (Math.abs(value) >= 1_000_000) return `R$ ${(value / 1_000_000).toFixed(1).replace(".", ",")} mi`;
   if (Math.abs(value) >= 1000) return `R$ ${(value / 1000).toFixed(1).replace(".", ",")} mil`;
   return ptCurrency.format(value);
 };
@@ -390,16 +391,19 @@ const DashboardPage = () => {
     const expense = expenseDirect + expenseCardPending + debtExpense;
     const previousIncome = previousTransactions.filter((tx) => tx.type === "income" && isCash(tx)).reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
     const previousExpense = previousTransactions.filter((tx) => tx.type === "expense" && isCash(tx)).reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
-    return { income, expense, balance: income - expense, previousBalance: previousIncome - previousExpense };
+    return { income, expense, balance: income - expense, cashBalance: incomeTx - expenseDirect, previousBalance: previousIncome - previousExpense };
   }, [cardTxsDueInMonth, monthDebts, previousTransactions, transactions]);
 
   const balanceVariation = useMemo(() => {
-    const current = totals.balance;
+    // Compara CAIXA vs CAIXA (mesma metodologia nos dois lados). Antes, o lado
+    // atual usava balance (com fatura pendente + dívidas) e o anterior só caixa,
+    // produzindo uma variação percentual enganosa (F58/F62).
+    const current = totals.cashBalance;
     const previous = totals.previousBalance;
     const improved = current >= previous;
     const percentage = previous === 0 ? (current === 0 ? 0 : 100) : Math.abs(((current - previous) / previous) * 100);
     return { improved, value: percentage };
-  }, [totals.balance, totals.previousBalance]);
+  }, [totals.cashBalance, totals.previousBalance]);
 
   const totalBankBalance = useMemo(() => accounts.reduce((sum, account) => sum + Number(account.balance || 0), 0), [accounts]);
 
@@ -555,6 +559,10 @@ const DashboardPage = () => {
     // Despesas não-cartão do mês visível.
     transactions
       .filter((tx) => tx.type === "expense" && !tx.card_id)
+      // Exclui o lançamento "Pagamento Fatura": as compras do cartão já entram
+      // pelo cardTxsDueInMonth (com suas categorias), então contar o pagamento
+      // também dobraria o valor no donut (F61).
+      .filter((tx) => !(tx.description ?? "").startsWith("Pagamento Fatura"))
       .filter((tx) => (categoriesTab === "paid" ? tx.status === "paid" : tx.status === "pending"))
       .forEach(addTx);
 
