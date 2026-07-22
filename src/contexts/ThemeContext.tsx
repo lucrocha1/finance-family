@@ -14,10 +14,11 @@ const STORAGE_KEY = "finance-family-theme";
 const ThemeContext = createContext<ThemeContextValue | undefined>(undefined);
 
 const readInitialTheme = (): Theme => {
-  if (typeof window === "undefined") return "light";
+  if (typeof window === "undefined") return "dark";
   const stored = window.localStorage.getItem(STORAGE_KEY);
   if (stored === "dark" || stored === "light") return stored;
-  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  // Tema Vorne (cinza escuro + verde) é dark por padrão; usuário pode alternar.
+  return "dark";
 };
 
 export const ThemeProvider = ({ children }: { children: ReactNode }) => {

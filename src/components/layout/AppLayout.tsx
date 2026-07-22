@@ -117,10 +117,10 @@ export const AppLayout = () => {
         onClick={() => setMobileOpen(false)}
         className={({ isActive }) =>
           cn(
-            "relative mx-3 flex items-center gap-3 rounded-[10px] px-3 py-2.5 text-sm font-medium transition-all duration-200",
+            "group relative mx-3 flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200",
             isActive
-              ? "bg-sidebar-accent text-sidebar-accent-foreground before:absolute before:left-[-12px] before:top-1/2 before:h-1.5 before:w-1.5 before:-translate-y-1/2 before:rounded-full before:bg-sidebar-primary"
-              : "text-sidebar-foreground/85 hover:bg-[hsl(var(--sidebar-hover-bg))] hover:text-sidebar-foreground",
+              ? "bg-gradient-brand-soft text-sidebar-foreground shadow-[inset_0_0_0_1px_rgb(var(--accent-rgb)/0.25)]"
+              : "text-sidebar-foreground/75 hover:bg-[hsl(var(--sidebar-hover-bg))] hover:text-sidebar-foreground",
           )
         }
       >

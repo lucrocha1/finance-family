@@ -1,175 +1,172 @@
-@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap");
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-/* Design system — Sequence.io inspired. Light por padrão, dark via classe `.dark` no <html>.
-   Todas as cores em HSL (sem `hsl()` no valor) para combinar com `hsl(var(--token))` no Tailwind.
-*/
+/* Design system — camada de FORMA do Vorne aplicada ao Finance Family.
+   Primary = VERDE, superfícies dark = CINZA ESCURO NEUTRO. Vidro, raio 16px,
+   números em mono, glows do accent, fundo ambiente. Dark é o tema principal.
+   Cores em HSL (sem hsl()) pra casar com hsl(var(--token)) no Tailwind. */
 
 @layer base {
   :root {
-    /* Surfaces */
-    --background: 215 28% 94%;        /* #E9ECF2 — fundo mais marcado p/ cards se destacarem */
-    --foreground: 222 47% 8%;         /* #0B1220 — texto preto-azulado mais forte */
+    /* ==== LIGHT (secundário) — verde + cinza claro neutro ==== */
+    --background: 220 14% 96%;
+    --foreground: 240 10% 8%;
 
-    --card: 0 0% 100%;                /* #FFFFFF */
-    --card-foreground: 222 47% 8%;
-
+    --card: 0 0% 100%;
+    --card-foreground: 240 10% 8%;
     --popover: 0 0% 100%;
-    --popover-foreground: 222 47% 8%;
+    --popover-foreground: 240 10% 8%;
 
-    /* Brand */
-    --primary: 160 84% 39%;           /* #10B981 emerald */
+    --primary: 142 71% 42%;
     --primary-foreground: 0 0% 100%;
-    --primary-hover: 160 84% 32%;     /* #059669 */
+    --primary-hover: 142 71% 36%;
 
-    --brand-dark: 168 64% 14%;        /* #0F3E3C deep teal */
+    --brand-dark: 150 40% 14%;
     --brand-dark-foreground: 0 0% 100%;
-    --brand-dark-muted: 168 30% 70%;
-    --accent-bright: 142 71% 45%;     /* #22C55E verde brilhante (charts) */
+    --brand-dark-muted: 150 20% 60%;
+    --accent-bright: 142 71% 45%;
 
-    /* Secondary / inputs / muted */
-    --secondary: 220 14% 96%;         /* #F3F4F6 */
-    --secondary-foreground: 220 39% 11%;
+    --secondary: 220 14% 93%;
+    --secondary-foreground: 240 10% 12%;
+    --muted: 220 14% 93%;
+    --muted-foreground: 240 5% 38%;
 
-    --muted: 220 14% 96%;
-    --muted-foreground: 220 14% 32%;  /* #424B5C — bem mais escuro p/ legibilidade */
+    --accent: 142 60% 95%;
+    --accent-foreground: 142 70% 22%;
+    --accent-hover: 142 71% 36%;
+    --accent-light: 142 60% 95%;
+    --accent-light-foreground: 142 70% 22%;
 
-    /* Accent (badges/tags claro) */
-    --accent: 152 81% 96%;            /* #ECFDF5 */
-    --accent-foreground: 158 84% 20%; /* #065F46 */
-    --accent-hover: 160 84% 32%;
-    --accent-light: 152 81% 96%;
-    --accent-light-foreground: 158 84% 20%;
-
-    /* Status */
-    --destructive: 0 84% 60%;         /* #EF4444 */
+    --destructive: 0 84% 58%;
     --destructive-foreground: 0 0% 100%;
-    --destructive-light: 0 86% 97%;   /* #FEF2F2 */
+    --destructive-light: 0 86% 97%;
 
-    --success: 160 84% 39%;
-    --warning: 38 92% 50%;            /* #F59E0B */
-    --warning-light: 48 100% 96%;     /* #FFFBEB */
-    --info: 217 91% 60%;              /* #3B82F6 */
-    --info-hover: 221 83% 53%;
+    --success: 142 71% 42%;
+    --warning: 38 92% 50%;
+    --warning-light: 48 100% 96%;
+    --info: 199 89% 48%;
+    --info-hover: 199 89% 42%;
 
-    /* Borders / focus */
-    --border: 220 13% 82%;            /* #C8CCD3 — borders mais visíveis */
-    --input: 220 14% 96%;
-    --ring: 160 84% 39%;
+    --border: 220 13% 85%;
+    --input: 220 14% 93%;
+    --ring: 142 71% 42%;
 
-    --radius: 0.75rem;
+    --radius: 1rem;                 /* 16px — a curva do Vorne */
+    --accent-rgb: 34 197 94;        /* verde em R G B (glows/foco) */
 
-    /* Sidebar — solid deep emerald with white type */
-    --sidebar-background: 168 65% 14%;        /* #0F3E3C */
-    --sidebar-foreground: 0 0% 100%;
-    --sidebar-primary: 160 84% 50%;
-    --sidebar-primary-foreground: 168 65% 10%;
-    --sidebar-accent: 168 50% 22%;
-    --sidebar-accent-foreground: 0 0% 100%;
-    --sidebar-border: 168 40% 22%;
-    --sidebar-ring: 160 84% 50%;
-    --sidebar-hover-bg: 168 45% 20%;
-    --sidebar-hover-foreground: 0 0% 100%;
-    --sidebar-header-bg: 0 0% 100% / 0.10;  /* faixa branco-translúcida em cima */
+    --sidebar-background: 240 8% 10%;
+    --sidebar-foreground: 0 0% 90%;
+    --sidebar-primary: 142 72% 48%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 240 6% 16%;
+    --sidebar-accent-foreground: 0 0% 98%;
+    --sidebar-border: 240 6% 16%;
+    --sidebar-ring: 142 72% 48%;
+    --sidebar-hover-bg: 240 6% 16%;
+    --sidebar-hover-foreground: 0 0% 98%;
+    --sidebar-header-bg: 0 0% 100% / 0.03;
 
-    /* Misc */
-    --section-label: 220 9% 65%;      /* #9CA3AF */
-    --placeholder-icon: 220 9% 65%;
-    --placeholder-subtitle: 220 9% 46%;
-    --overlay: 220 39% 11%;
+    --section-label: 240 6% 55%;
+    --placeholder-icon: 240 6% 65%;
+    --placeholder-subtitle: 240 6% 46%;
+    --overlay: 240 10% 8%;
 
-    /* Effects */
-    --shadow-card: 0 1px 3px rgba(15, 23, 42, 0.10), 0 2px 6px rgba(15, 23, 42, 0.06);
-    --shadow-card-hover: 0 6px 16px rgba(15, 23, 42, 0.12), 0 3px 8px rgba(15, 23, 42, 0.08);
-    --gradient-accent: linear-gradient(135deg, hsl(160 84% 39%), hsl(160 84% 32%));
+    --shadow-card: 0 1px 3px rgba(15, 23, 42, 0.10), 0 2px 8px rgba(15, 23, 42, 0.06);
+    --shadow-card-hover: 0 8px 24px rgba(15, 23, 42, 0.12);
+    --shadow-glow: 0 0 0 1px rgb(var(--accent-rgb) / 0.15), 0 0 24px rgb(var(--accent-rgb) / 0.16);
+    --gradient-accent: linear-gradient(135deg, hsl(142 71% 45%), hsl(142 71% 38%));
 
-    /* Glassmorphism — sólido o bastante p/ contraste em telas claras */
-    --glass-bg: 0 0% 100% / 0.92;
+    --glass-bg: 0 0% 100% / 0.9;
     --glass-bg-strong: 0 0% 100% / 0.98;
-    --glass-border: 220 13% 82% / 1;
+    --glass-border: 220 13% 85% / 1;
     --glass-blur: 14px;
     --glass-shadow: 0 1px 3px rgba(15, 23, 42, 0.08), 0 6px 20px rgba(15, 23, 42, 0.08);
-    --glow-1: 160 60% 80%;            /* very soft mint wash */
-    --glow-2: 168 30% 92%;            /* near-white teal */
+    --glass-luz: 0 0% 0% / 0.03;    /* "peso" interno sutil no light */
+    --ambient-vignette: 0 0% 100% / 0;
+    --glow-1: 142 60% 80%;
+    --glow-2: 142 40% 92%;
   }
 
   .dark {
-    --background: 200 25% 6%;         /* tinta teal sutil */
-    --foreground: 220 14% 95%;        /* #F0F1F3 */
+    /* ==== DARK (principal) — verde + cinza escuro neutro (estilo Vorne) ==== */
+    --background: 240 6% 6%;         /* #0e0e11 — cinza quase-preto neutro */
+    --foreground: 0 0% 98%;
 
-    --card: 225 17% 13%;              /* #1A1D27 */
-    --card-foreground: 220 14% 95%;
+    --card: 240 5% 9%;               /* #16161a */
+    --card-foreground: 0 0% 98%;
+    --popover: 240 6% 8%;
+    --popover-foreground: 0 0% 98%;
 
-    --popover: 225 17% 13%;
-    --popover-foreground: 220 14% 95%;
-
-    --primary: 160 84% 39%;
+    --primary: 142 70% 46%;          /* verde vibrante */
     --primary-foreground: 0 0% 100%;
-    --primary-hover: 158 64% 52%;     /* #34D399 */
+    --primary-hover: 142 70% 52%;
 
-    --brand-dark: 168 60% 11%;
+    --brand-dark: 150 40% 12%;
     --brand-dark-foreground: 0 0% 100%;
-    --brand-dark-muted: 168 25% 60%;
-    --accent-bright: 142 71% 50%;
+    --brand-dark-muted: 150 20% 55%;
+    --accent-bright: 142 71% 52%;
 
-    --secondary: 225 18% 15%;         /* #1E2130 */
-    --secondary-foreground: 220 14% 95%;
+    --secondary: 240 5% 13%;
+    --secondary-foreground: 0 0% 98%;
+    --muted: 240 5% 13%;
+    --muted-foreground: 240 5% 62%;  /* #98989f */
 
-    --muted: 225 18% 15%;
-    --muted-foreground: 225 11% 60%;  /* #8B8FA3 */
+    --accent: 240 5% 14%;
+    --accent-foreground: 0 0% 98%;
+    --accent-hover: 142 70% 52%;
+    --accent-light: 142 40% 16%;
+    --accent-light-foreground: 142 65% 68%;
 
-    --accent: 160 84% 39%;
-    --accent-foreground: 0 0% 100%;
-    --accent-hover: 158 64% 52%;
-    --accent-light: 160 84% 18%;
-    --accent-light-foreground: 158 84% 67%; /* #6EE7B7 */
-
-    --destructive: 0 84% 60%;
+    --destructive: 0 72% 55%;
     --destructive-foreground: 0 0% 100%;
-    --destructive-light: 0 60% 20%;
+    --destructive-light: 0 50% 20%;
 
-    --success: 160 84% 39%;
-    --warning: 38 92% 50%;
-    --warning-light: 38 60% 18%;
-    --info: 217 91% 60%;
-    --info-hover: 221 83% 53%;
+    --success: 142 70% 46%;
+    --warning: 38 92% 52%;
+    --warning-light: 38 50% 18%;
+    --info: 199 89% 52%;
+    --info-hover: 199 89% 46%;
 
-    --border: 225 13% 20%;            /* #2A2D3A */
-    --input: 225 18% 15%;
-    --ring: 160 84% 39%;
+    --border: 240 5% 16%;            /* #26262b */
+    --input: 240 5% 14%;
+    --ring: 142 70% 46%;
 
-    --sidebar-background: 168 70% 10%;        /* deeper teal in dark mode */
-    --sidebar-foreground: 0 0% 100%;
-    --sidebar-primary: 160 84% 50%;
-    --sidebar-primary-foreground: 168 70% 8%;
-    --sidebar-accent: 168 50% 18%;
-    --sidebar-accent-foreground: 0 0% 100%;
-    --sidebar-border: 168 40% 18%;
-    --sidebar-ring: 160 84% 50%;
-    --sidebar-hover-bg: 168 45% 16%;
-    --sidebar-hover-foreground: 0 0% 100%;
-    --sidebar-header-bg: 0 0% 0% / 0.30;  /* sombra escura em cima no dark */
+    --accent-rgb: 35 199 95;         /* verde do dark em R G B */
 
-    --section-label: 225 11% 50%;
-    --placeholder-icon: 225 11% 38%;
-    --placeholder-subtitle: 225 11% 60%;
-    --overlay: 222 21% 4%;
+    --sidebar-background: 240 7% 5%; /* mais escuro que os cards */
+    --sidebar-foreground: 0 0% 86%;
+    --sidebar-primary: 142 72% 50%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 240 5% 12%;
+    --sidebar-accent-foreground: 0 0% 98%;
+    --sidebar-border: 240 5% 13%;
+    --sidebar-ring: 142 72% 50%;
+    --sidebar-hover-bg: 240 5% 12%;
+    --sidebar-hover-foreground: 0 0% 98%;
+    --sidebar-header-bg: 0 0% 100% / 0.02;
 
-    --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.3);
-    --shadow-card-hover: 0 4px 12px rgba(0, 0, 0, 0.4);
-    --gradient-accent: linear-gradient(135deg, hsl(160 84% 39%), hsl(158 64% 52%));
+    --section-label: 240 5% 50%;
+    --placeholder-icon: 240 5% 38%;
+    --placeholder-subtitle: 240 5% 60%;
+    --overlay: 240 10% 2%;
 
-    /* Glassmorphism (dark) — visible frosted tint over a tinted base */
-    --glass-bg: 0 0% 100% / 0.08;
-    --glass-bg-strong: 0 0% 100% / 0.12;
-    --glass-border: 0 0% 100% / 0.14;
-    --glass-blur: 22px;
-    --glass-shadow: 0 1px 2px rgba(0, 0, 0, 0.35), 0 8px 28px rgba(0, 0, 0, 0.35);
-    --glow-1: 160 70% 32%;
-    --glow-2: 168 55% 22%;
+    --shadow-card: 0 10px 30px rgba(0, 0, 0, 0.4);
+    --shadow-card-hover: 0 12px 32px rgba(0, 0, 0, 0.45), 0 0 36px rgb(var(--accent-rgb) / 0.08);
+    --shadow-glow: 0 0 0 1px rgb(var(--accent-rgb) / 0.15), 0 0 28px rgb(var(--accent-rgb) / 0.18);
+    --gradient-accent: linear-gradient(135deg, hsl(142 70% 46%), hsl(142 70% 38%));
+
+    --glass-bg: 240 6% 10% / 0.55;   /* vidro cinza escuro */
+    --glass-bg-strong: 240 6% 11% / 0.9;
+    --glass-border: 0 0% 100% / 0.07;
+    --glass-blur: 16px;
+    --glass-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+    --glass-luz: 0 0% 100% / 0.05;   /* luz branca interna (canto sup-esq) */
+    --ambient-vignette: 240 10% 2% / 0.55;
+    --glow-1: 0 0% 100%;             /* luz do fundo ambiente */
+    --glow-2: 142 70% 46%;
   }
 }
 
@@ -185,11 +182,13 @@
     transition: background-color 200ms ease, color 200ms ease;
   }
 
+  /* Fundo ambiente (Vorne): luz sutil no canto + halo verde + vinheta. */
   body {
     background-color: hsl(var(--background));
     background-image:
-      radial-gradient(70vw 70vh at 95% 0%, hsl(var(--glow-1) / 0.30), transparent 55%),
-      radial-gradient(60vw 60vh at -10% 110%, hsl(var(--glow-2) / 0.50), transparent 55%);
+      radial-gradient(ellipse 60% 50% at 0% 0%, hsl(var(--glow-1) / 0.05), transparent 60%),
+      radial-gradient(ellipse 55% 45% at 100% 0%, rgb(var(--accent-rgb) / 0.07), transparent 60%),
+      radial-gradient(ellipse 130% 130% at 50% 50%, transparent 55%, hsl(var(--ambient-vignette)) 100%);
     background-attachment: fixed;
     min-height: 100vh;
   }
@@ -220,10 +219,103 @@
   }
 }
 
-/* Promote bg-* utilities to glass for visual cohesion across the app. */
 @layer utilities {
+  /* Número em mono — todo dado numérico (moeda, %, contagem, data). */
+  .metric-value {
+    font-family: "JetBrains Mono", ui-monospace, "SFMono-Regular", monospace;
+    font-feature-settings: "tnum";
+    letter-spacing: -0.02em;
+  }
+
+  /* O app usa `tabular-nums` exatamente nos números lidos como dado — então
+     promovemos todos pra mono (JetBrains Mono), a assinatura Vorne no app
+     inteiro, sem editar componente por componente. */
+  .tabular-nums {
+    font-family: "JetBrains Mono", ui-monospace, "SFMono-Regular", monospace;
+    letter-spacing: -0.01em;
+  }
+
+  /* Card-assinatura Vorne — vidro + luz interna + glow do accent no hover. */
+  .glass-card {
+    position: relative;
+    overflow: hidden;
+    border: 1px solid hsl(var(--glass-border));
+    background-color: hsl(var(--glass-bg));
+    background-image: radial-gradient(circle at 0% 0%, hsl(var(--glass-luz)), transparent 55%);
+    backdrop-filter: blur(16px) saturate(180%);
+    -webkit-backdrop-filter: blur(16px) saturate(180%);
+    box-shadow: inset 0 1px 0 hsl(0 0% 100% / 0.04), var(--shadow-card);
+    transition: border-color 0.3s, box-shadow 0.4s, transform 0.4s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .glass-card::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0;
+    background: radial-gradient(circle at 100% 0%, rgb(var(--accent-rgb) / 0.12), transparent 60%);
+    transition: opacity 0.5s;
+  }
+  .glass-card > * {
+    position: relative;
+    z-index: 1;
+  }
+  .glass-card:hover {
+    border-color: rgb(var(--accent-rgb) / 0.25);
+    box-shadow: inset 0 1px 0 hsl(0 0% 100% / 0.04), var(--shadow-card), 0 0 48px rgb(var(--accent-rgb) / 0.08);
+  }
+  .glass-card:hover::after {
+    opacity: 1;
+  }
+
+  /* Gradiente do item ativo da sidebar (verde suave). */
+  .bg-gradient-brand-soft {
+    background-image: linear-gradient(135deg, rgb(var(--accent-rgb) / 0.16), rgb(var(--accent-rgb) / 0.06));
+  }
+
+  /* Hover lift opt-in (borda no accent + sobe 3px). */
+  .vorne-hover-lift {
+    transition: border-color 0.3s, transform 0.4s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.4s;
+  }
+  .vorne-hover-lift:hover {
+    border-color: rgb(var(--accent-rgb) / 0.35);
+    transform: translateY(-3px);
+    box-shadow: var(--shadow-card-hover);
+  }
+
+  .vorne-eyebrow {
+    color: rgb(var(--accent-rgb));
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+  }
+  .vorne-divider-glow {
+    height: 1px;
+    box-shadow: 0 0 12px rgb(var(--accent-rgb) / 0.4);
+    background: linear-gradient(90deg, transparent 0%, rgb(var(--accent-rgb) / 0.6) 50%, transparent 100%);
+  }
+
+  .bg-grid {
+    background-image:
+      linear-gradient(hsl(var(--glass-luz)) 1px, transparent 1px),
+      linear-gradient(90deg, hsl(var(--glass-luz)) 1px, transparent 1px);
+    background-size: 32px 32px;
+  }
+
+  @keyframes fade-in-up {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .animate-fade-in-up { animation: fade-in-up 0.4s ease both; }
+  .animate-delay-100 { animation-delay: 100ms; }
+  .animate-delay-200 { animation-delay: 200ms; }
+  .animate-delay-300 { animation-delay: 300ms; }
+
+  /* Promoção global: todo bg-card vira vidro cinza com luz interna. */
   .bg-card {
     background-color: hsl(var(--glass-bg)) !important;
+    background-image: radial-gradient(circle at 0% 0%, hsl(var(--glass-luz)), transparent 60%);
     backdrop-filter: blur(var(--glass-blur)) saturate(140%);
     -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(140%);
     box-shadow: var(--glass-shadow);
@@ -235,8 +327,6 @@
     -webkit-backdrop-filter: blur(calc(var(--glass-blur) + 4px)) saturate(160%);
     box-shadow: var(--glass-shadow);
   }
-  /* Sidebar stays solid deep-emerald (no glass) for contrast */
-  /* Inputs, select triggers, tab triggers, hover backgrounds: subtle glass */
   .bg-secondary,
   .bg-input,
   .bg-muted {
@@ -245,3 +335,14 @@
     -webkit-backdrop-filter: blur(10px) saturate(140%);
   }
 }
+
+@media (prefers-reduced-motion: reduce) {
+  .vorne-hover-lift:hover { transform: none; }
+  .animate-fade-in-up { animation: none; opacity: 1; transform: none; }
+}
+
+/* Scrollbar fina no tom do accent. */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: hsl(0 0% 100% / 0.08); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: rgb(var(--accent-rgb) / 0.5); }
