@@ -542,17 +542,17 @@ const DebtDetailPage = () => {
                     key={row.installment}
                     className={cn(
                       "border-b border-border/40",
-                      row.payment && "opacity-60",
+                      row.status === "paid" && "opacity-60",
                       row.status === "overdue" && "bg-destructive/10",
                     )}
                     style={row.isCurrent ? { boxShadow: "inset 3px 0 0 hsl(var(--accent))" } : undefined}
                   >
                     <td className="px-3 py-3">{row.installment}</td>
                     <td className="px-3 py-3">{formatDate(row.dueDate)}</td>
-                    <td className={cn("px-3 py-3", row.payment && "line-through")}>{ptCurrency.format(row.amount)}</td>
+                    <td className={cn("px-3 py-3", row.status === "paid" && "line-through")}>{ptCurrency.format(row.amount)}</td>
                     <td className="px-3 py-3">
-                      {row.payment ? (
-                        <span className="text-[hsl(var(--success))]">✓ Paga em {formatDate(row.payment.date)}</span>
+                      {row.status === "paid" ? (
+                        <span className="text-[hsl(var(--success))]">✓ {row.payment ? `Paga em ${formatDate(row.payment.date)}` : "Paga"}</span>
                       ) : row.status === "overdue" ? (
                         <span className="rounded-md bg-destructive/20 px-2 py-1 text-xs font-semibold text-destructive">Atrasada</span>
                       ) : row.status === "pending" ? (
@@ -566,11 +566,11 @@ const DebtDetailPage = () => {
                         <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={() => setDeleteTarget(row.payment)}>
                           Desfazer
                         </Button>
-                      ) : (
+                      ) : row.isCurrent ? (
                         <Button size="sm" className="rounded-md" onClick={() => openPayModal(row.installment)}>
                           Pagar
                         </Button>
-                      )}
+                      ) : null}
                     </td>
                   </tr>
                 ))}
