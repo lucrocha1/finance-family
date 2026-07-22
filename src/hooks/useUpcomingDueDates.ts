@@ -62,7 +62,7 @@ export const useUpcomingDueDates = (familyId: string | null | undefined) => {
           .order("due_date", { ascending: true }),
         supabase
           .from("debts")
-          .select("id, name, total_with_interest, original_amount, due_date, status, direction, has_installments, installment_amount")
+          .select("id, name, total_with_interest, original_amount, amount_paid, due_date, status, direction, has_installments, installment_amount")
           .neq("status", "paid_off")
           .not("due_date", "is", null)
           .gte("due_date", today)
@@ -107,10 +107,11 @@ export const useUpcomingDueDates = (familyId: string | null | undefined) => {
         source: "debt",
         description: `${d.direction === "they_owe" ? "Receber" : "Pagar"} — ${d.name ?? "Dívida"}`,
         // Parceladas: o due_date é o da PRÓXIMA parcela, então mostramos o valor
-        // da parcela, não o total do empréstimo (F53).
+        // da parcela, não o total do empréstimo (F53). À vista: mostramos o
+        // RESTANTE (total - pago), não o total cheio, coerente com Agenda/Detalhe.
         amount: d.has_installments && Number(d.installment_amount ?? 0) > 0
           ? Number(d.installment_amount)
-          : Number(d.total_with_interest ?? d.original_amount ?? 0),
+          : Math.max(0, Number(d.total_with_interest ?? d.original_amount ?? 0) - Number(d.amount_paid ?? 0)),
         date: d.due_date,
         type: d.direction === "they_owe" ? "income" : "expense",
         routeTarget: `/debts/${d.id}`,

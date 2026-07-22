@@ -74,7 +74,12 @@ type DebtRow = {
 };
 
 const ptCurrency = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
-const todayIso = () => new Date().toISOString().slice(0, 10);
+// Data de hoje no fuso LOCAL. toISOString() é UTC e à noite no Brasil (UTC-3)
+// virava o dia seguinte, marcando dívidas como atrasadas 1 dia cedo.
+const todayIso = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
 
 const debtSchema = z
   .object({

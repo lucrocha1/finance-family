@@ -53,6 +53,14 @@ const isoWeek = (d = new Date()) => {
 };
 const monthKey = (date = new Date()) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
 
+// Valor "a vencer" de uma dívida: a PARCELA (parceladas) ou o RESTANTE = total -
+// pago (à vista). Antes somava-se sempre o total_with_interest cheio, ignorando
+// parcela e amount_paid, superestimando os alertas frente a Agenda/Dashboard.
+const debtDueAmount = (d: any) => {
+  if (d.has_installments && Number(d.installment_amount ?? 0) > 0) return Number(d.installment_amount);
+  return Math.max(0, Number(d.total_with_interest ?? d.original_amount ?? 0) - Number(d.amount_paid ?? 0));
+};
+
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
@@ -128,13 +136,13 @@ const checkDailyDue = async (sb: SupabaseClient, userId: string) => {
       .eq("user_id", userId).eq("status", "pending").is("card_id", null).eq("date", tdy),
     sb.from("scheduled_payments").select("id, description, amount, type")
       .eq("user_id", userId).eq("is_paid", false).eq("due_date", tdy),
-    sb.from("debts").select("id, name, total_with_interest, original_amount, direction")
+    sb.from("debts").select("id, name, total_with_interest, original_amount, amount_paid, has_installments, installment_amount, direction")
       .eq("user_id", userId).neq("status", "paid_off").eq("due_date", tdy),
   ]);
   const total =
     (tx.data ?? []).reduce((s: number, t: any) => s + Number(t.amount || 0), 0) +
     (sched.data ?? []).reduce((s: number, t: any) => s + Number(t.amount || 0), 0) +
-    (debts.data ?? []).reduce((s: number, t: any) => s + Number(t.total_with_interest ?? t.original_amount ?? 0), 0);
+    (debts.data ?? []).reduce((s: number, t: any) => s + debtDueAmount(t), 0);
   const count = (tx.data?.length ?? 0) + (sched.data?.length ?? 0) + (debts.data?.length ?? 0);
   if (count === 0) return;
   await insertNotifications(sb, [{
@@ -160,14 +168,14 @@ const checkWeeklySummary = async (sb: SupabaseClient, userId: string) => {
     sb.from("scheduled_payments").select("amount, type")
       .eq("user_id", userId).eq("is_paid", false)
       .gte("due_date", start).lte("due_date", endIso),
-    sb.from("debts").select("total_with_interest, original_amount, direction")
+    sb.from("debts").select("total_with_interest, original_amount, amount_paid, has_installments, installment_amount, direction")
       .eq("user_id", userId).neq("status", "paid_off").not("due_date", "is", null)
       .gte("due_date", start).lte("due_date", endIso),
   ]);
   const total =
     (tx.data ?? []).reduce((s: number, t: any) => s + Number(t.amount || 0), 0) +
     (sched.data ?? []).reduce((s: number, t: any) => s + Number(t.amount || 0), 0) +
-    (debts.data ?? []).reduce((s: number, t: any) => s + Number(t.total_with_interest ?? t.original_amount ?? 0), 0);
+    (debts.data ?? []).reduce((s: number, t: any) => s + debtDueAmount(t), 0);
   const count = (tx.data?.length ?? 0) + (sched.data?.length ?? 0) + (debts.data?.length ?? 0);
   if (count === 0) return;
   await insertNotifications(sb, [{
@@ -266,7 +274,7 @@ const checkOverdueTx = async (sb: SupabaseClient, userId: string) => {
 const checkOverdueDebts = async (sb: SupabaseClient, userId: string) => {
   const tdy = today();
   const { data } = await sb.from("debts")
-    .select("id, name, due_date, total_with_interest, original_amount, direction")
+    .select("id, name, due_date, total_with_interest, original_amount, amount_paid, has_installments, installment_amount, direction")
     .eq("user_id", userId).neq("status", "paid_off").not("due_date", "is", null)
     .lt("due_date", tdy);
   const items: Notif[] = (data ?? []).map((d: any) => ({
@@ -274,7 +282,7 @@ const checkOverdueDebts = async (sb: SupabaseClient, userId: string) => {
     kind: "debt_overdue",
     severity: "warning",
     title: `${d.direction === "they_owe" ? "Receber" : "Pagar"} atrasado — ${d.name}`,
-    body: `${ptCurrency(Number(d.total_with_interest ?? d.original_amount ?? 0))} • venceu em ${new Date(`${d.due_date}T00:00:00`).toLocaleDateString("pt-BR")}.`,
+    body: `${ptCurrency(debtDueAmount(d))} • venceu em ${new Date(`${d.due_date}T00:00:00`).toLocaleDateString("pt-BR")}.`,
     link_to: `/debts/${d.id}`,
     metadata: { debt_id: d.id },
     dedup_key: `debt_overdue:${d.id}`,

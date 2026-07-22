@@ -387,7 +387,10 @@ const SchedulePage = () => {
       const out: ScheduledRow[] = [];
       for (let i = 0; i < totalInstallments; i++) {
         const due = new Date(start);
-        due.setMonth(due.getMonth() + i);
+        // Parcela 1 vence start + 1 mês (mesma convenção do DebtDetail e do
+        // trigger). Antes usava start + i, deixando a parcela 1 no start_date e
+        // divergindo 1 mês do detalhe.
+        due.setMonth(due.getMonth() + i + 1);
         const dueIso = toISODate(due);
         const number = i + 1;
         const isPaidParcel = number <= installmentsPaid;
