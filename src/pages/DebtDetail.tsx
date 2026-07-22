@@ -413,46 +413,18 @@ const DebtDetailPage = () => {
   };
 
   const simulator = useMemo(() => {
-    if (!debt) return { months: 0, endDate: "-", monthlyValue: 0, saving: 0 };
+    if (!debt) return { months: 0, endDate: "-", monthlyValue: 0 };
 
     const monthlyValue = digitsToValue(simMonthlyDigits);
-    if (monthlyValue <= 0 || remaining <= 0) return { months: 0, endDate: "-", monthlyValue, saving: 0 };
+    if (monthlyValue <= 0 || remaining <= 0) return { months: 0, endDate: "-", monthlyValue };
 
-    let months = 0;
-    let saving = 0;
-    const r = (debt.interest_rate ?? 0) / 100;
-    // Juros compostos só se aplicam a dívida ROTATIVA (juros mensais e SEM
-    // parcelamento). Numa dívida parcelada, total_with_interest já embute todos
-    // os juros do prazo, então `remaining` já é valor COM juros — reaplicar a
-    // fórmula contava juros sobre juros e inflava o prazo/data (F21).
-    const isRevolving = debt.has_interest && debt.interest_type === "monthly" && r > 0 && !debt.has_installments;
-    if (isRevolving) {
-      const minPayment = remaining * r;
-      if (monthlyValue <= minPayment) months = 999;
-      else {
-        const numerator = Math.log(monthlyValue / (monthlyValue - remaining * r));
-        const denominator = Math.log(1 + r);
-        months = Math.ceil(numerator / denominator);
-      }
-    } else {
-      months = Math.ceil(remaining / monthlyValue);
-    }
+    // O total da dívida é FIXO (os juros já foram embutidos no cadastro — à
+    // vista pró-rata ou parcelado via Price). Então o simulador é uma quitação
+    // linear: restante ÷ pagamento mensal, sem recalcular juros sobre o saldo.
+    const months = Math.max(1, Math.ceil(remaining / monthlyValue));
+    const endDate = formatDate(addMonths(todayIso(), months));
 
-    const safeMonths = Number.isFinite(months) ? Math.max(1, months) : 999;
-    const endDate = safeMonths >= 999 ? "-" : formatDate(addMonths(todayIso(), safeMonths));
-
-    // Economia de juros só existe em dívida rotativa (juros correndo sobre o
-    // saldo). Antes, saving = max(0, remaining - projectedPaid) dava SEMPRE 0,
-    // porque projectedPaid >= remaining (F20). Comparamos os juros pagos
-    // amortizando vs. o custo de só rolar o mínimo (juros) pelos mesmos meses.
-    if (isRevolving && safeMonths < 999) {
-      const projectedPaid = monthlyValue * safeMonths;
-      const interestPaid = Math.max(0, projectedPaid - remaining);
-      const interestIfMinimum = remaining * r * safeMonths;
-      saving = Math.max(0, interestIfMinimum - interestPaid);
-    }
-
-    return { months: safeMonths, endDate, monthlyValue, saving };
+    return { months, endDate, monthlyValue };
   }, [debt, remaining, simMonthlyDigits]);
 
   if (loading) {
@@ -654,15 +626,10 @@ const DebtDetailPage = () => {
           </div>
           <p className="text-sm text-muted-foreground">
             {receivable ? "Se receber" : "Se pagar"} <span className="font-semibold text-foreground">{ptCurrency.format(simulator.monthlyValue)}</span> por mês, {receivable ? "recebe tudo em" : "quita em"}{" "}
-            <span className="font-semibold text-foreground">{simulator.months >= 999 ? "valor insuficiente" : `${simulator.months} meses`}</span>
-            {simulator.months < 999 ? <span> (até <span className="font-semibold text-foreground">{simulator.endDate}</span>)</span> : null}.
+            <span className="font-semibold text-foreground">{simulator.months} {simulator.months === 1 ? "mês" : "meses"}</span>
+            {simulator.endDate !== "-" ? <span> (até <span className="font-semibold text-foreground">{simulator.endDate}</span>)</span> : null}.
           </p>
         </div>
-        {simulator.saving > 0 && (
-          <p className="text-sm text-muted-foreground">
-            Economia de juros: <span className="font-semibold text-[hsl(var(--success))]">{ptCurrency.format(simulator.saving)}</span> vs. rolar só o mínimo.
-          </p>
-        )}
       </section>
 
       <Dialog open={payOpen} onOpenChange={setPayOpen}>

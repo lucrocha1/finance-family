@@ -308,7 +308,9 @@ const SchedulePage = () => {
       supabase
         .from("debts")
         .select("id, name, total_with_interest, original_amount, amount_paid, due_date, status, direction, has_installments, total_installments, installments_paid, installment_amount, start_date")
-        .neq("status", "paid_off"),
+        // Só dívidas ativas: renegociadas são tratadas como encerradas
+        // (substituídas por novos termos) e não aparecem na agenda/projeções.
+        .eq("status", "active"),
       supabase.from("cards").select("id, name, closing_day, due_day"),
       supabase
         .from("transactions")
