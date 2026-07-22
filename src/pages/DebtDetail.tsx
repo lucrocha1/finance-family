@@ -43,6 +43,7 @@ type DebtRow = {
   counterpart_type: CounterpartType;
   counterpart_member_id: string | null;
   original_amount: number;
+  iof_amount: number | null;
   total_with_interest: number | null;
   amount_paid: number;
   has_interest: boolean;
@@ -79,7 +80,13 @@ type ScheduleRow = {
 };
 
 const ptCurrency = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
-const todayIso = () => new Date().toISOString().slice(0, 10);
+// Data de hoje no fuso LOCAL. toISOString() devolve UTC, então à noite no
+// Brasil (UTC-3) "hoje" virava o dia seguinte e vencimentos disparavam
+// "atrasado"/overdue um dia cedo.
+const todayIso = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
 const formatDate = (value: string | null) => (value ? new Date(`${value}T00:00:00`).toLocaleDateString("pt-BR") : "-");
 const toMoneyDigits = (value: number) => String(Math.round(value * 100));
 const digitsToValue = (digits: string) => Number(digits || "0") / 100;
@@ -185,6 +192,7 @@ const DebtDetailPage = () => {
       counterpart_type: ((raw.counterpart_type as CounterpartType | null) ?? "person") as CounterpartType,
       counterpart_member_id: (raw.counterpart_member_id as string | null) ?? null,
       original_amount: Number(raw.original_amount ?? 0),
+      iof_amount: raw.iof_amount === null || raw.iof_amount === undefined ? null : Number(raw.iof_amount),
       total_with_interest: raw.total_with_interest === null || raw.total_with_interest === undefined ? null : Number(raw.total_with_interest),
       amount_paid: Number(raw.amount_paid ?? 0),
       has_interest: Boolean(raw.has_interest),
@@ -208,6 +216,9 @@ const DebtDetailPage = () => {
       installment_number: row.installment_number === null || row.installment_number === undefined ? null : Number(row.installment_number),
       notes: (row.notes as string | null) ?? null,
       created_at: (row.created_at as string | null) ?? null,
+      // Sem propagar transaction_id, deleteTarget.transaction_id ficava undefined
+      // e a transação bancária vinculada nunca era estornada ao excluir o pagamento.
+      transaction_id: (row.transaction_id as string | null) ?? null,
     }));
 
     setDebt(normalizedDebt);
@@ -235,6 +246,10 @@ const DebtDetailPage = () => {
   const remaining = debt ? Math.max(0, total - Number(debt.amount_paid || 0)) : 0;
   const paidPercent = total > 0 ? Math.max(0, Math.min(100, (Number(debt?.amount_paid || 0) / total) * 100)) : 0;
   const uiStatus = debt ? getUiStatus(debt) : "active";
+  // they_owe = alguém me deve; registrar um lançamento é RECEBER (credita a conta),
+  // não pagar. Ajusta os rótulos da tela para não induzir ao contrário.
+  const receivable = debt?.direction === "they_owe";
+  const actionLabel = receivable ? "Registrar Recebimento" : "Registrar Pagamento";
 
   const paymentsByInstallment = useMemo(() => {
     const map = new Map<number, DebtPaymentRow>();
@@ -265,8 +280,12 @@ const DebtDetailPage = () => {
       let status: ScheduleRow["status"];
       if (installment <= paidCount) {
         status = "paid";
+      } else if (dueDate < todayIso()) {
+        // Qualquer parcela em aberto já vencida é "Atrasada", não só a próxima —
+        // antes as parcelas vencidas além da próxima apareciam como "Futura".
+        status = "overdue";
       } else if (installment === nextPendingInstallment) {
-        status = dueDate < todayIso() ? "overdue" : "pending";
+        status = "pending";
       } else {
         status = "future";
       }
@@ -457,7 +476,7 @@ const DebtDetailPage = () => {
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-destructive/40 bg-destructive/10 p-4">
           <p className="text-sm font-medium text-destructive">⚠️ Esta dívida está atrasada! Vencimento era {formatDate(debt.due_date)}</p>
           <Button size="sm" className="rounded-md" onClick={() => openPayModal(null)}>
-            Registrar Pagamento
+            {actionLabel}
           </Button>
         </div>
       )}
@@ -510,6 +529,9 @@ const DebtDetailPage = () => {
             <p className="text-sm text-muted-foreground">
               Juros: <span className="text-foreground">{debt.has_interest && debt.interest_rate ? `${debt.interest_rate.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}% ${debt.interest_type === "monthly" ? "ao mês" : debt.interest_type === "yearly" ? "ao ano" : "total"}` : "Sem juros"}</span>
             </p>
+            {debt.iof_amount != null && debt.iof_amount > 0 && (
+              <p className="text-sm text-muted-foreground">IOF: <span className="text-foreground">{ptCurrency.format(debt.iof_amount)}</span></p>
+            )}
             <p className="text-sm text-muted-foreground">Valor total: <span className="text-foreground">{ptCurrency.format(total)}</span></p>
             <p className="text-sm text-[hsl(var(--success))]">Já pago: {ptCurrency.format(debt.amount_paid)}</p>
             <p className="text-2xl font-bold text-foreground">Restante: {ptCurrency.format(remaining)}</p>
@@ -562,11 +584,14 @@ const DebtDetailPage = () => {
                       )}
                     </td>
                     <td className="px-3 py-3 text-right">
-                      {row.payment ? (
+                      {row.status === "paid" && row.payment ? (
                         <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={() => setDeleteTarget(row.payment)}>
                           Desfazer
                         </Button>
-                      ) : row.isCurrent ? (
+                      ) : row.status !== "paid" && row.isCurrent ? (
+                        // Mostra "Pagar" mesmo com pagamento PARCIAL na parcela atual
+                        // (antes o botão sumia porque row.payment existia, travando
+                        // o restante). O parcial é desfeito na lista de pagamentos.
                         <Button size="sm" className="rounded-md" onClick={() => openPayModal(row.installment)}>
                           Pagar
                         </Button>
@@ -582,9 +607,9 @@ const DebtDetailPage = () => {
 
       <section className="space-y-3 rounded-xl border p-5" style={{ backgroundColor: "#12121a", borderColor: "#1e1e2e" }}>
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h2 className="text-lg font-semibold text-foreground">Pagamentos Realizados</h2>
+          <h2 className="text-lg font-semibold text-foreground">{receivable ? "Recebimentos Realizados" : "Pagamentos Realizados"}</h2>
           <Button size="sm" className="rounded-md" onClick={() => openPayModal(null)}>
-            Registrar Pagamento
+            {actionLabel}
           </Button>
         </div>
 
@@ -621,14 +646,14 @@ const DebtDetailPage = () => {
       </section>
 
       <section className="space-y-3 rounded-xl border p-5" style={{ backgroundColor: "#12121a", borderColor: "#1e1e2e" }}>
-        <h2 className="text-lg font-semibold text-foreground">Simulador de Quitação</h2>
+        <h2 className="text-lg font-semibold text-foreground">{receivable ? "Simulador de Recebimento" : "Simulador de Quitação"}</h2>
         <div className="grid grid-cols-1 gap-3 md:grid-cols-[260px_1fr] md:items-end">
           <div className="space-y-2">
             <Label>Pagamento mensal</Label>
             <Input value={ptCurrency.format(digitsToValue(simMonthlyDigits))} onChange={(event) => setSimMonthlyDigits(event.target.value.replace(/\D/g, ""))} inputMode="numeric" />
           </div>
           <p className="text-sm text-muted-foreground">
-            Se pagar <span className="font-semibold text-foreground">{ptCurrency.format(simulator.monthlyValue)}</span> por mês, quita em{" "}
+            {receivable ? "Se receber" : "Se pagar"} <span className="font-semibold text-foreground">{ptCurrency.format(simulator.monthlyValue)}</span> por mês, {receivable ? "recebe tudo em" : "quita em"}{" "}
             <span className="font-semibold text-foreground">{simulator.months >= 999 ? "valor insuficiente" : `${simulator.months} meses`}</span>
             {simulator.months < 999 ? <span> (até <span className="font-semibold text-foreground">{simulator.endDate}</span>)</span> : null}.
           </p>
@@ -643,7 +668,7 @@ const DebtDetailPage = () => {
       <Dialog open={payOpen} onOpenChange={setPayOpen}>
         <DialogContent className="max-w-[400px] border-border bg-card">
           <DialogHeader>
-            <DialogTitle>Registrar Pagamento — {debt.name}</DialogTitle>
+            <DialogTitle>{actionLabel} — {debt.name}</DialogTitle>
           </DialogHeader>
 
           <div className="space-y-3">
@@ -653,7 +678,7 @@ const DebtDetailPage = () => {
             ) : null}
 
             <div className="space-y-2">
-              <Label>Valor do pagamento</Label>
+              <Label>{receivable ? "Valor do recebimento" : "Valor do pagamento"}</Label>
               <Input value={ptCurrency.format(digitsToValue(payAmountDigits))} onChange={(event) => setPayAmountDigits(event.target.value.replace(/\D/g, ""))} inputMode="numeric" />
             </div>
 
@@ -663,7 +688,7 @@ const DebtDetailPage = () => {
             </div>
 
             <div className="space-y-2">
-              <Label>Conta de débito (opcional)</Label>
+              <Label>{receivable ? "Conta de crédito (opcional)" : "Conta de débito (opcional)"}</Label>
               <Select value={payAccountId} onValueChange={setPayAccountId}>
                 <SelectTrigger><SelectValue placeholder="Selecione" /></SelectTrigger>
                 <SelectContent>

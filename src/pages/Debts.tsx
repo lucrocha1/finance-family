@@ -84,7 +84,7 @@ const debtSchema = z
     counterpartType: z.enum(["person", "company", "family_member"]),
     counterpartName: z.string().trim().max(120).optional(),
     counterpartMemberId: z.string().trim().optional(),
-    originalAmountCents: z.number().int().min(1, "Valor original obrigatório"),
+    originalAmountCents: z.number().int().min(1, "Valor original obrigatório").max(100_000_000_000, "Valor muito alto"),
     hasInterest: z.boolean(),
     interestRate: z.number().min(0).max(999).optional(),
     interestType: z.enum(["monthly", "yearly", "total"]).optional(),
@@ -118,6 +118,15 @@ const debtSchema = z
       }
       if ((values.interestRate ?? 0) <= 0) {
         ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["interestRate"], message: "Taxa de juros inválida" });
+      }
+      // Empréstimo à vista com juros pró-rata (mensal/anual) precisa de vencimento
+      // futuro, senão daysBetween=0 e o juro fica R$ 0 silenciosamente (#5).
+      if (!values.hasInstallments && values.interestType !== "total") {
+        if (!values.dueDate) {
+          ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["dueDate"], message: "Informe o vencimento para calcular os juros" });
+        } else if (values.dueDate <= values.startDate) {
+          ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["dueDate"], message: "Vencimento deve ser depois do início" });
+        }
       }
     }
 
@@ -315,7 +324,14 @@ const DebtsPage = () => {
       const uiStatus = getUiStatus(debt);
       if (directionFilter !== "all" && debt.direction !== directionFilter) return false;
       if (typeFilter !== "all" && debt.type !== typeFilter) return false;
-      if (statusFilter !== "all" && uiStatus !== statusFilter) return false;
+      if (statusFilter !== "all") {
+        // "Ativos" engloba as atrasadas (dívida vencida ainda está em aberto);
+        // sem isso o filtro padrão escondia justamente as mais urgentes.
+        const matchesStatus = statusFilter === "active"
+          ? uiStatus === "active" || uiStatus === "overdue"
+          : uiStatus === statusFilter;
+        if (!matchesStatus) return false;
+      }
       if (priorityFilter !== "all" && debt.priority !== priorityFilter) return false;
       return true;
     });
@@ -350,14 +366,24 @@ const DebtsPage = () => {
     if (type !== "loan" || !hasInterest || monthlyRate <= 0) return 0;
     const base = originalAmount;
 
-    // Installment loans: monthly compounding (Tabela Price simplified)
+    // Empréstimo parcelado: Tabela Price (PMT). O principal amortiza a cada
+    // parcela, então o juro incide só sobre o saldo devedor. O IOF é financiado
+    // (entra no principal). Antes usava-se base*(1+i)^n (juros "bullet" sobre o
+    // principal cheio até o fim), que superestimava juros e parcela.
     if (hasInstallments && installmentsCount >= 2) {
-      if (interestType === "monthly") return base * Math.pow(1 + monthlyRate / 100, installmentsCount) - base;
-      if (interestType === "yearly") return base * Math.pow(1 + monthlyRate / 100, installmentsCount / 12) - base;
-      return base * (monthlyRate / 100);
+      // Juros "total": percentual único sobre o principal (flat), sem Price.
+      if (interestType === "total") return base * (monthlyRate / 100);
+      // Taxa efetiva mensal: mensal direto; anual -> equivalente composto mensal.
+      const i = interestType === "yearly" ? Math.pow(1 + monthlyRate / 100, 1 / 12) - 1 : monthlyRate / 100;
+      const principal = base + iofAmount;
+      const pmt = (principal * i) / (1 - Math.pow(1 + i, -installmentsCount));
+      const pmtRounded = Math.round(pmt * 100) / 100;
+      // totalWithInterestPreview = base + interestPreview + iofAmount; devolvemos
+      // o necessário para o total fechar em pmtRounded * n (parcelas iguais).
+      return pmtRounded * installmentsCount - base - iofAmount;
     }
 
-    // Single payment: pro-rata by actual days
+    // Pagamento único: juros simples pró-rata pelos dias corridos.
     if (interestType === "monthly") {
       const dailyRate = monthlyRate / 100 / 30;
       return base * dailyRate * daysBetween;
@@ -367,7 +393,7 @@ const DebtsPage = () => {
       return base * dailyRate * daysBetween;
     }
     return base * (monthlyRate / 100);
-  }, [daysBetween, hasInstallments, hasInterest, installmentsCount, interestType, monthlyRate, originalAmount, type]);
+  }, [daysBetween, hasInstallments, hasInterest, installmentsCount, interestType, iofAmount, monthlyRate, originalAmount, type]);
 
   const totalWithInterestPreview = useMemo(
     () => originalAmount + interestPreview + iofAmount,
@@ -376,14 +402,17 @@ const DebtsPage = () => {
 
   const installmentAmountPreview = useMemo(() => {
     if (type !== "loan" || !hasInstallments || installmentsCount < 2) return 0;
-    return totalWithInterestPreview / installmentsCount;
+    return Math.round((totalWithInterestPreview / installmentsCount) * 100) / 100;
   }, [hasInstallments, installmentsCount, totalWithInterestPreview, type]);
 
   useEffect(() => {
     if (type === "loan" && hasInstallments && installmentsCount >= 2 && startDate) {
-      setDueDate(addMonths(startDate, installmentsCount));
+      // due_date = próxima parcela em aberto (mesma convenção do trigger e do
+      // cronograma), não a parcela final. Dívida nova = start + 1 mês. Antes
+      // gravava start + n, sumindo o empréstimo do caixa projetado por N-1 meses.
+      setDueDate(addMonths(startDate, (editing?.installments_paid ?? 0) + 1));
     }
-  }, [hasInstallments, installmentsCount, startDate, type]);
+  }, [editing, hasInstallments, installmentsCount, startDate, type]);
 
   const resetForm = () => {
     setEditing(null);
@@ -462,8 +491,38 @@ const DebtsPage = () => {
       return;
     }
 
-    const totalWithInterest = parsed.data.type === "loan" ? totalWithInterestPreview : parsed.data.originalAmountCents / 100;
-    const installmentAmount = parsed.data.type === "loan" && parsed.data.hasInstallments ? totalWithInterest / Number(parsed.data.totalInstallments || 1) : null;
+    const installmentsN = Number(parsed.data.totalInstallments || 1);
+    const isInstallmentLoan = parsed.data.type === "loan" && parsed.data.hasInstallments;
+    // Parcelado: installment_amount arredondado a centavos e total = parcela * n
+    // (parcelas iguais, soma bate com o total), coerente com o trigger
+    // debts_recompute (installments_paid = floor(pago / parcela)).
+    const installmentAmount = isInstallmentLoan
+      ? Math.round((totalWithInterestPreview / installmentsN) * 100) / 100
+      : null;
+    const totalWithInterest = parsed.data.type !== "loan"
+      ? parsed.data.originalAmountCents / 100
+      : isInstallmentLoan
+        ? Math.round((installmentAmount as number) * installmentsN * 100) / 100
+        : totalWithInterestPreview;
+
+    // O trigger debts_recompute só roda em INSERT/DELETE de debt_payments, nunca
+    // em UPDATE da dívida. Ao editar uma dívida que já tem pagamentos, o novo
+    // total/parcela precisa ser reconciliado com o amount_paid preservado, senão
+    // o card mostraria "Quitado" com restante em aberto (ou vice-versa) (#6).
+    const paidSoFar = editing ? Number(editing.amount_paid || 0) : 0;
+    const syncedInstallmentsPaid = isInstallmentLoan
+      ? Math.min(Math.floor((paidSoFar + 0.01) / (installmentAmount as number)), installmentsN)
+      : null;
+    const syncedIsPaid = isInstallmentLoan
+      ? (syncedInstallmentsPaid as number) >= installmentsN
+      : paidSoFar >= totalWithInterest - 0.01;
+    const syncedStatus = !editing
+      ? "active"
+      : editing.status === "renegotiated"
+        ? "renegotiated"
+        : syncedIsPaid
+          ? "paid_off"
+          : "active";
 
     const selectedMemberName = parsed.data.counterpartMemberId ? memberNameMap.get(parsed.data.counterpartMemberId) : null;
 
@@ -487,11 +546,11 @@ const DebtsPage = () => {
       interest_type: parsed.data.type === "loan" && parsed.data.hasInterest ? parsed.data.interestType : null,
       has_installments: parsed.data.type === "loan" ? parsed.data.hasInstallments : false,
       total_installments: parsed.data.type === "loan" && parsed.data.hasInstallments ? parsed.data.totalInstallments : null,
-      installments_paid: parsed.data.type === "loan" && parsed.data.hasInstallments ? (editing?.installments_paid ?? 0) : null,
-      installment_amount: parsed.data.type === "loan" && parsed.data.hasInstallments ? installmentAmount : null,
+      installments_paid: isInstallmentLoan ? syncedInstallmentsPaid : null,
+      installment_amount: isInstallmentLoan ? installmentAmount : null,
       start_date: parsed.data.startDate,
       due_date: parsed.data.dueDate || null,
-      status: editing ? editing.status : "active",
+      status: syncedStatus,
       priority: parsed.data.priority,
     };
 
@@ -552,7 +611,7 @@ const DebtsPage = () => {
 
   const openPaymentModal = (debt: DebtRow) => {
     const remaining = getRemaining(debt);
-    const defaultValue = debt.has_installments ? debt.installment_amount || remaining : remaining;
+    const defaultValue = debt.has_installments ? Math.min(debt.installment_amount || remaining, remaining) : remaining;
     setPaymentDebt(debt);
     setPaymentAmountDigits(toMoneyDigits(defaultValue));
     setPaymentDate(todayIso());
@@ -741,8 +800,8 @@ const DebtsPage = () => {
       ) : filteredDebts.length === 0 ? (
         <div className="rounded-xl border border-border px-6 py-12 text-center">
           <Handshake className="mx-auto h-12 w-12 text-muted-foreground" />
-          <p className="mt-4 text-lg font-semibold text-foreground">Nenhuma dívida ou empréstimo cadastrado</p>
-          <p className="mt-1 text-sm text-muted-foreground">Quando tiver uma dívida ou receber um pagamento, cadastre aqui</p>
+          <p className="mt-4 text-lg font-semibold text-foreground">{debts.length === 0 ? "Nenhuma dívida ou empréstimo cadastrado" : "Nenhuma dívida com esse filtro"}</p>
+          <p className="mt-1 text-sm text-muted-foreground">{debts.length === 0 ? "Quando tiver uma dívida ou receber um pagamento, cadastre aqui" : "Ajuste os filtros acima para ver outras dívidas"}</p>
           <Button className="mt-5 rounded-lg" onClick={openCreate}>
             + Nova Dívida
           </Button>
@@ -847,12 +906,13 @@ const DebtsPage = () => {
                         Registrar pagamento
                       </Button>
                       <Button size="sm" variant="ghost" onClick={() => navigate(`/debts/${debt.id}`)}>Ver detalhes</Button>
-                      <Button size="icon" variant="ghost" onClick={() => openEdit(debt)}>
+                      <Button size="icon" variant="ghost" aria-label={`Editar ${debt.name}`} onClick={() => openEdit(debt)}>
                         <Pencil className="h-4 w-4" />
                       </Button>
                       <Button
                         size="icon"
                         variant="ghost"
+                        aria-label={`Excluir ${debt.name}`}
                         className="text-muted-foreground hover:text-destructive"
                         onClick={() => {
                           setEditing(debt);
@@ -1114,7 +1174,16 @@ const DebtsPage = () => {
               )}
 
               <div className="space-y-2">
-                <Label>Valor do pagamento</Label>
+                <div className="flex items-center justify-between">
+                  <Label>{paymentDebt.direction === "they_owe" ? "Valor do recebimento" : "Valor do pagamento"}</Label>
+                  <button
+                    type="button"
+                    className="text-xs font-medium text-primary hover:underline"
+                    onClick={() => setPaymentAmountDigits(toMoneyDigits(getRemaining(paymentDebt)))}
+                  >
+                    Quitar tudo
+                  </button>
+                </div>
                 <Input value={ptCurrency.format(digitsToValue(paymentAmountDigits))} onChange={(event) => setPaymentAmountDigits(event.target.value.replace(/\D/g, ""))} inputMode="numeric" />
               </div>
 
@@ -1127,6 +1196,10 @@ const DebtsPage = () => {
                 <Label>Notas</Label>
                 <Input value={paymentNotes} onChange={(event) => setPaymentNotes(event.target.value)} maxLength={200} />
               </div>
+
+              <p className="text-xs text-muted-foreground">
+                Pagamento rápido — não movimenta conta bancária. Para {paymentDebt.direction === "they_owe" ? "creditar" : "debitar"} uma conta, use “Ver detalhes”.
+              </p>
 
               {paymentError && <p className="text-sm text-destructive">{paymentError}</p>}
             </div>
