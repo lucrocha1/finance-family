@@ -266,8 +266,12 @@ const GoalsPage = () => {
   const budgetCards = useMemo(() => {
     const rows = categories.map((category) => {
       const spent = monthExpenses.get(category.id) ?? 0;
-      const budget = budgetByCategory.get(category.id);
-      const limit = budget ? Number(budget.amount || 0) : null;
+      const rawBudget = budgetByCategory.get(category.id);
+      // Marcador amount=0 (fim de vigência de um limite herdado — F24) conta como
+      // "sem limite" na exibição, mas continua bloqueando a herança porque
+      // budgetByCategory já o escolheu como o registro mais recente.
+      const budget = rawBudget && Number(rawBudget.amount || 0) > 0 ? rawBudget : undefined;
+      const limit = budget ? Number(budget.amount) : null;
       const percent = limit && limit > 0 ? (spent / limit) * 100 : 0;
       const overAmount = limit ? Math.max(spent - limit, 0) : 0;
       return { category, spent, budget, limit, percent, overAmount };
@@ -289,6 +293,7 @@ const GoalsPage = () => {
     let totalBudget = 0;
     let totalSpent = 0;
     budgetByCategory.forEach((b, categoryId) => {
+      if (Number(b.amount || 0) <= 0) return; // marcador de fim de vigência (F24)
       totalBudget += Number(b.amount || 0);
       totalSpent += monthExpenses.get(categoryId) ?? 0;
     });
@@ -377,8 +382,23 @@ const GoalsPage = () => {
     void loadData();
   };
 
-  const removeBudget = async (budgetId: string) => {
-    const { error } = await supabase.from("budgets").delete().eq("id", budgetId);
+  const removeBudget = async (budget: BudgetRow) => {
+    if (!family?.id || !user?.id) return;
+    // Se o limite vigente foi criado NESTE mês, remove a linha. Se for herdado de
+    // um mês anterior (sticky), NÃO apaga a linha de origem — isso apagaria o
+    // limite dos meses passados (F24). Em vez disso grava um marcador amount=0
+    // pra este mês, encerrando a vigência daqui pra frente.
+    const isThisMonth = budget.year === year && budget.month === month;
+    const { error } = isThisMonth
+      ? await supabase.from("budgets").delete().eq("id", budget.id)
+      : await supabase.from("budgets").insert({
+          family_id: family.id,
+          user_id: user.id,
+          category_id: budget.category_id,
+          amount: 0,
+          month,
+          year,
+        });
     if (error) {
       toast.error("Não foi possível remover o limite");
       return;
@@ -435,24 +455,44 @@ const GoalsPage = () => {
 
     setGoalSaving(true);
 
-    const nextStatus: GoalStatus = current >= target ? "completed" : editingGoal?.status === "paused" ? "paused" : "active";
-
-    const payload = {
+    // current_amount é derivado dos aportes (trigger goals_recompute_current),
+    // então não gravamos aqui. Na criação, um "valor atual" inicial vira um
+    // aporte "Saldo inicial" pra o ledger bater; na edição não mexemos no valor
+    // atual (evita desincronizar a barra de progresso do ledger — F23/F25).
+    const basePayload = {
       name: goalName.trim(),
       emoji: goalEmoji,
       color: goalColor,
       target_amount: target,
-      current_amount: current,
       target_date: goalDeadline ? toIsoDate(goalDeadline) : null,
       description: goalDescription.trim() || null,
-      status: nextStatus,
       family_id: family.id,
       user_id: user.id,
     };
 
-    const { error } = editingGoal
-      ? await supabase.from("goals").update(payload).eq("id", editingGoal.id)
-      : await supabase.from("goals").insert(payload);
+    let error: { message: string } | null = null;
+    if (editingGoal) {
+      const res = await supabase.from("goals").update(basePayload).eq("id", editingGoal.id);
+      error = res.error;
+    } else {
+      const { data: created, error: insErr } = await supabase
+        .from("goals")
+        .insert({ ...basePayload, status: "active", current_amount: 0 })
+        .select("id")
+        .single();
+      error = insErr;
+      if (!error && created && current > 0) {
+        const res = await supabase.from("goal_contributions").insert({
+          goal_id: created.id,
+          family_id: family.id,
+          user_id: user.id,
+          amount: current,
+          date: toIsoDate(new Date()),
+          notes: "Saldo inicial",
+        });
+        error = res.error;
+      }
+    }
 
     setGoalSaving(false);
 
@@ -522,28 +562,16 @@ const GoalsPage = () => {
 
     const { error: insertError } = await supabase.from("goal_contributions").insert(insertPayload);
 
+    setContributionSaving(false);
+
     if (insertError) {
-      setContributionSaving(false);
       toast.error("Não foi possível registrar o aporte");
       return;
     }
 
-    const nextCurrent = contributionGoal.current_amount + amount;
-    const reached = nextCurrent >= contributionGoal.target_amount;
-    const nextStatus: GoalStatus = reached ? "completed" : contributionGoal.status;
-
-    const { error: updateError } = await supabase
-      .from("goals")
-      .update({ current_amount: nextCurrent, status: nextStatus })
-      .eq("id", contributionGoal.id);
-
-    setContributionSaving(false);
-
-    if (updateError) {
-      toast.error("Aporte salvo, mas não foi possível atualizar o progresso");
-      return;
-    }
-
+    // current_amount e status da meta são atualizados pelo trigger
+    // goals_recompute_current (soma dos aportes) — nada de read-modify-write aqui.
+    const reached = contributionGoal.current_amount + amount >= contributionGoal.target_amount;
     toast.success(reached ? "🎉 Meta alcançada!" : "Aporte registrado");
     setContributionModalOpen(false);
     void loadData();
@@ -559,19 +587,7 @@ const GoalsPage = () => {
       return;
     }
 
-    const nextCurrent = Math.max(goal.current_amount - contribution.amount, 0);
-    const nextStatus: GoalStatus = nextCurrent >= goal.target_amount ? "completed" : goal.status === "paused" ? "paused" : "active";
-
-    const { error: updateError } = await supabase
-      .from("goals")
-      .update({ current_amount: nextCurrent, status: nextStatus })
-      .eq("id", goal.id);
-
-    if (updateError) {
-      toast.error("Aporte removido, mas o saldo da meta não foi atualizado");
-      return;
-    }
-
+    // current_amount e status são recalculados pelo trigger goals_recompute_current.
     toast.success("Aporte removido");
     void loadData();
   };
@@ -670,7 +686,7 @@ const GoalsPage = () => {
                               <Button variant="outline" size="sm" onClick={() => openBudgetEditor(row.category.id, row.limit)}>
                                 <Pencil className="mr-1 h-3.5 w-3.5" /> Editar
                               </Button>
-                              <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-destructive" onClick={() => removeBudget(row.budget!.id)}>
+                              <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-destructive" onClick={() => removeBudget(row.budget!)}>
                                 <Trash2 className="h-4 w-4" />
                               </Button>
                             </>
@@ -940,10 +956,12 @@ const GoalsPage = () => {
                 <Label>Valor alvo</Label>
                 <Input value={ptCurrency.format(moneyDigitsToValue(goalTargetDigits))} onChange={(event) => setGoalTargetDigits(event.target.value.replace(/\D/g, ""))} placeholder="R$ 0,00" />
               </div>
-              <div className="space-y-1.5">
-                <Label>Valor atual</Label>
-                <Input value={ptCurrency.format(moneyDigitsToValue(goalCurrentDigits))} onChange={(event) => setGoalCurrentDigits(event.target.value.replace(/\D/g, ""))} placeholder="R$ 0,00" />
-              </div>
+              {!editingGoal && (
+                <div className="space-y-1.5">
+                  <Label>Valor atual (inicial)</Label>
+                  <Input value={ptCurrency.format(moneyDigitsToValue(goalCurrentDigits))} onChange={(event) => setGoalCurrentDigits(event.target.value.replace(/\D/g, ""))} placeholder="R$ 0,00" />
+                </div>
+              )}
             </div>
 
             <div className="space-y-1.5">

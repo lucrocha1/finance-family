@@ -70,6 +70,7 @@ type TransactionRow = {
   recurrence_parent_id?: string | null;
   linked_user_id?: string | null;
   linked_pair_id?: string | null;
+  transfer_group_id?: string | null;
   categories?: { id?: string; name?: string; color?: string | null; type?: string | null; icon?: string | null } | { id?: string; name?: string; color?: string | null; type?: string | null; icon?: string | null }[] | null;
   accounts?: { id?: string; name?: string; institution?: string | null } | { id?: string; name?: string; institution?: string | null }[] | null;
   cards?: { id?: string; name?: string; brand?: string | null } | { id?: string; name?: string; brand?: string | null }[] | null;
@@ -467,10 +468,10 @@ const TransactionsPage = () => {
 
   const canSave = useMemo(() => {
     if (!description.trim() || amountCents <= 0) return false;
-    if (formType === "transfer") return Boolean(fromAccountId && toAccountId && fromAccountId !== toAccountId);
+    if (formType === "transfer") return editing ? amountCents > 0 : Boolean(fromAccountId && toAccountId && fromAccountId !== toAccountId);
     if (formType === "income") return Boolean(categoryId && accountId);
     return Boolean(categoryId && (cardId !== "none" || accountId));
-  }, [accountId, amountCents, cardId, categoryId, description, formType, fromAccountId, toAccountId]);
+  }, [accountId, amountCents, cardId, categoryId, description, editing, formType, fromAccountId, toAccountId]);
 
   const exportTransactionsCSV = () => {
     if (filtered.length === 0) {
@@ -595,6 +596,21 @@ const TransactionsPage = () => {
           const failed = result.find((r) => r.error);
           if (failed?.error) errorMessage = failed.error.message;
         }
+      } else if (editing.type === "transfer" && editing.transfer_group_id) {
+        // Edita as DUAS pernas do par (F14): valor/data/descrição/notas/status
+        // aplicados a ambas, preservando a conta e o transfer_direction de cada
+        // lado (as contas não mudam na edição — o form as omite quando editando).
+        const { error } = await supabase
+          .from("transactions")
+          .update({
+            description: base.description,
+            amount: base.amount,
+            date: base.date,
+            notes: base.notes,
+            status: base.status,
+          })
+          .eq("transfer_group_id", editing.transfer_group_id);
+        if (error) errorMessage = error.message;
       } else {
         const { error } = await supabase
           .from("transactions")
@@ -626,9 +642,12 @@ const TransactionsPage = () => {
     } else if (parsed.data.type === "transfer") {
       // Transfer cria 2 rows: 'out' debita origem, 'in' credita destino.
       // O trigger de saldo inverte sinal baseado em transfer_direction.
+      // As duas pernas compartilham transfer_group_id pra serem editadas/
+      // excluídas/marcadas como pagas juntas, de forma atômica (F13/F14/F16).
+      const transferGroupId = crypto.randomUUID();
       const payload = [
-        { ...base, type: "transfer", account_id: parsed.data.fromAccountId, transfer_direction: "out", user_id: ctx.userId, family_id: ctx.familyId },
-        { ...base, type: "transfer", account_id: parsed.data.toAccountId, transfer_direction: "in", user_id: ctx.userId, family_id: ctx.familyId },
+        { ...base, type: "transfer", account_id: parsed.data.fromAccountId, transfer_direction: "out", transfer_group_id: transferGroupId, user_id: ctx.userId, family_id: ctx.familyId },
+        { ...base, type: "transfer", account_id: parsed.data.toAccountId, transfer_direction: "in", transfer_group_id: transferGroupId, user_id: ctx.userId, family_id: ctx.familyId },
       ];
       const { error } = await supabase.from("transactions").insert(payload);
       if (error) errorMessage = error.message;
@@ -746,6 +765,27 @@ const TransactionsPage = () => {
       toast.success("Par excluído nos dois membros");
       return;
     }
+    if (deleteTarget.type === "transfer" && deleteTarget.transfer_group_id) {
+      // Exclui as DUAS pernas do par (F13): senão a perna órfã continua sendo
+      // somada pelo trigger de saldo e o total do banco fica errado.
+      const { error } = await supabase
+        .from("transactions")
+        .delete()
+        .eq("transfer_group_id", deleteTarget.transfer_group_id);
+      if (error) {
+        toast.error("Não foi possível excluir a transferência");
+        return;
+      }
+      setDeleteOpen(false);
+      setDeleteTarget(null);
+      if (editing?.id === deleteTarget.id) {
+        setOpen(false);
+        resetForm();
+      }
+      await loadData();
+      toast.success("Transferência excluída");
+      return;
+    }
     const isRecurringTarget = Boolean(deleteTarget.is_recurring) || Boolean(deleteTarget.recurrence_parent_id);
     const recurrenceRootId = deleteTarget.recurrence_parent_id ?? (deleteTarget.is_recurring ? deleteTarget.id : null);
     let query = supabase.from("transactions").delete();
@@ -787,7 +827,12 @@ const TransactionsPage = () => {
   };
 
   const markPaid = async (tx: TransactionRow) => {
-    const { error } = await supabase.from("transactions").update({ status: "paid" }).eq("id", tx.id);
+    // Transferência: marca as DUAS pernas como pagas juntas (F16); senão o
+    // trigger aplica o efeito de saldo de um lado só e o total fica errado.
+    const updateQuery = supabase.from("transactions").update({ status: "paid" });
+    const { error } = tx.type === "transfer" && tx.transfer_group_id
+      ? await updateQuery.eq("transfer_group_id", tx.transfer_group_id)
+      : await updateQuery.eq("id", tx.id);
     if (error) {
       toast.error("Não foi possível atualizar o status");
       return;
@@ -1167,7 +1212,11 @@ const TransactionsPage = () => {
             )}
 
             {formType === "transfer" ? (
-              <div className="grid grid-cols-1 gap-3 md:grid-cols-2"><div className="space-y-2"><Label className="text-xs text-muted-foreground">De (conta origem)</Label><Select value={fromAccountId || "none"} onValueChange={(value) => setFromAccountId(value === "none" ? "" : value)}><SelectTrigger className="h-[42px] rounded-lg border-border bg-secondary text-foreground"><SelectValue placeholder="Selecione" /></SelectTrigger><SelectContent className="border-border bg-card text-card-foreground">{accounts.map((account) => <SelectItem key={account.id} value={account.id}>{account.name}</SelectItem>)}</SelectContent></Select></div><div className="space-y-2"><Label className="text-xs text-muted-foreground">Para (conta destino)</Label><Select value={toAccountId || "none"} onValueChange={(value) => setToAccountId(value === "none" ? "" : value)}><SelectTrigger className="h-[42px] rounded-lg border-border bg-secondary text-foreground"><SelectValue placeholder="Selecione" /></SelectTrigger><SelectContent className="border-border bg-card text-card-foreground">{accounts.map((account) => <SelectItem key={account.id} value={account.id}>{account.name}</SelectItem>)}</SelectContent></Select></div></div>
+              editing ? (
+                <p className="rounded-lg border border-border bg-secondary/30 p-3 text-xs text-muted-foreground">Transferência entre contas — a edição de valor, data, descrição e status é aplicada às duas pernas. Para trocar as contas de origem/destino, exclua e recrie a transferência.</p>
+              ) : (
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2"><div className="space-y-2"><Label className="text-xs text-muted-foreground">De (conta origem)</Label><Select value={fromAccountId || "none"} onValueChange={(value) => setFromAccountId(value === "none" ? "" : value)}><SelectTrigger className="h-[42px] rounded-lg border-border bg-secondary text-foreground"><SelectValue placeholder="Selecione" /></SelectTrigger><SelectContent className="border-border bg-card text-card-foreground">{accounts.map((account) => <SelectItem key={account.id} value={account.id}>{account.name}</SelectItem>)}</SelectContent></Select></div><div className="space-y-2"><Label className="text-xs text-muted-foreground">Para (conta destino)</Label><Select value={toAccountId || "none"} onValueChange={(value) => setToAccountId(value === "none" ? "" : value)}><SelectTrigger className="h-[42px] rounded-lg border-border bg-secondary text-foreground"><SelectValue placeholder="Selecione" /></SelectTrigger><SelectContent className="border-border bg-card text-card-foreground">{accounts.map((account) => <SelectItem key={account.id} value={account.id}>{account.name}</SelectItem>)}</SelectContent></Select></div></div>
+              )
             ) : formType === "expense" ? (
               <>
                 <div className="space-y-2"><Label className="text-xs text-muted-foreground">Cartão (opcional)</Label><Select value={cardId} onValueChange={setCardId}><SelectTrigger className="h-[42px] rounded-lg border-border bg-secondary text-foreground"><SelectValue /></SelectTrigger><SelectContent className="border-border bg-card text-card-foreground"><SelectItem value="none">Sem cartão</SelectItem>{cards.map((card) => <SelectItem key={card.id} value={card.id}>{card.name}</SelectItem>)}</SelectContent></Select>{cards.length === 0 && <p className="text-xs text-muted-foreground">Nenhum cartão cadastrado. <button type="button" onClick={() => { setOpen(false); window.location.href = "/cards"; }} className="font-semibold text-primary underline-offset-2 hover:underline">Cadastrar agora</button></p>}</div>

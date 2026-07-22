@@ -49,6 +49,7 @@ type AccountRow = {
   family_id: string;
   name: string;
   institution: string | null;
+  initial_balance: number;
   balance: number;
   type: AccountType;
   color: string | null;
@@ -189,7 +190,7 @@ const SettingsPage = () => {
     const [accountsRes, categoriesRes] = await Promise.all([
       supabase
         .from("accounts")
-        .select("id, user_id, family_id, name, institution, balance, type, color")
+        .select("id, user_id, family_id, name, institution, initial_balance, balance, type, color")
         .eq("family_id", family.id)
         .order("name", { ascending: true }),
       supabase
@@ -212,6 +213,7 @@ const SettingsPage = () => {
           family_id: String(row.family_id ?? family.id),
           name: String(row.name ?? "Conta"),
           institution: (row.institution as string | null) ?? null,
+          initial_balance: Number(row.balance ?? 0),
           balance: Number(row.balance ?? 0),
           type: "checking",
           color: ACCOUNT_COLORS[0],
@@ -225,6 +227,7 @@ const SettingsPage = () => {
           family_id: String(row.family_id ?? family.id),
           name: String(row.name ?? "Conta"),
           institution: (row.institution as string | null) ?? null,
+          initial_balance: Number(row.initial_balance ?? 0),
           balance: Number(row.balance ?? 0),
           type: ((row.type as AccountType | null) ?? "checking") as AccountType,
           color: (row.color as string | null) ?? ACCOUNT_COLORS[0],
@@ -344,7 +347,7 @@ const SettingsPage = () => {
     setAccountName(account.name);
     setAccountType(account.type);
     setAccountInstitution(account.institution ?? "");
-    setAccountBalanceDigits(moneyValueToDigits(account.balance));
+    setAccountBalanceDigits(moneyValueToDigits(account.initial_balance));
     setAccountColor(account.color ?? ACCOUNT_COLORS[0]);
     setAccountModalOpen(true);
   };
@@ -357,12 +360,15 @@ const SettingsPage = () => {
     }
 
     const initialBalance = moneyDigitsToValue(accountBalanceDigits);
+    // Grava apenas o saldo INICIAL (de abertura). O `balance` é derivado pelo
+    // trigger recompute_account_balance (= initial_balance + soma das transações
+    // pagas). Gravar balance aqui causava dupla contagem a cada edição da conta,
+    // mesmo só trocando nome/cor (F1/F42).
     const payload = {
       name: accountName.trim(),
       type: accountType,
       institution: accountInstitution.trim() || null,
       initial_balance: initialBalance,
-      balance: initialBalance,
       color: accountColor,
       user_id: user.id,
       family_id: family.id,
@@ -838,8 +844,9 @@ const SettingsPage = () => {
               <Input value={accountInstitution} onChange={(event) => setAccountInstitution(event.target.value)} placeholder="Ex: Nubank, Itaú..." />
             </div>
             <div className="space-y-1.5">
-              <Label>Saldo atual</Label>
+              <Label>Saldo inicial (de abertura)</Label>
               <Input value={ptCurrency.format(moneyDigitsToValue(accountBalanceDigits))} onChange={(event) => setAccountBalanceDigits(event.target.value.replace(/\D/g, ""))} placeholder="R$ 0,00" />
+              <p className="text-xs text-muted-foreground">O saldo exibido é este valor somado às transações pagas da conta.</p>
             </div>
             <div className="space-y-1.5">
               <Label>Cor</Label>
