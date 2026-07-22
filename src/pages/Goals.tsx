@@ -645,7 +645,7 @@ const GoalsPage = () => {
             </Card>
             <Card>
               <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-semibold text-muted-foreground">Gasto Real</CardTitle>
+                <CardTitle className="text-sm font-semibold text-muted-foreground">Gasto (categorias com limite)</CardTitle>
               </CardHeader>
               <CardContent className="pt-0 text-2xl font-bold text-foreground">{ptCurrency.format(budgetSummary.totalSpent)}</CardContent>
             </Card>
@@ -747,7 +747,7 @@ const GoalsPage = () => {
 
           <Card className="rounded-xl border-border bg-card">
             <CardHeader>
-              <CardTitle className="text-lg font-bold text-foreground">Orçado vs Gasto Real</CardTitle>
+              <CardTitle className="text-lg font-bold text-foreground">Orçado vs Gasto</CardTitle>
             </CardHeader>
             <CardContent>
               {budgetChartData.length === 0 ? (
@@ -815,7 +815,10 @@ const GoalsPage = () => {
                 const remaining = Math.max(goal.target_amount - goal.current_amount, 0);
                 const daysLeft = daysUntil(goal.target_date);
                 const warnDeadline = daysLeft !== null && daysLeft >= 0 && daysLeft < 30 && progress < 80;
-                const monthsLeft = daysLeft !== null ? Math.max(1, Math.ceil(daysLeft / 30)) : null;
+                // Só projeta "precisa de X/mês" com prazo ainda em aberto
+                // (daysLeft > 0). Antes, prazo vencido caía no Math.max(1, ...) e
+                // exibia projeção como se faltasse 1 mês (F26).
+                const monthsLeft = daysLeft !== null && daysLeft > 0 ? Math.max(1, Math.ceil(daysLeft / 30)) : null;
                 const perMonth = monthsLeft ? remaining / monthsLeft : null;
                 const expanded = expandedGoals.includes(goal.id);
                 const goalContributions = contributionsByGoal.get(goal.id) ?? [];

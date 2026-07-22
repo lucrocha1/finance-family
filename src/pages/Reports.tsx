@@ -52,6 +52,11 @@ const monthLabel = (key: string) => {
   return new Date(year, month - 1, 1).toLocaleDateString("pt-BR", { month: "short" }).replace(".", "");
 };
 const asSingle = <T,>(v: T | T[] | null | undefined): T | null => (Array.isArray(v) ? (v[0] ?? null) : (v ?? null));
+// "Pagamento Fatura" é uma despesa sem cartão que quita a fatura. As compras do
+// cartão já entram nas despesas (com categoria), então contar o pagamento também
+// dobraria o gasto no mesmo período (F60). Excluímos o pagamento das agregações.
+const isInvoicePayment = (tx: { card_id?: string | null; description?: string | null }) =>
+  !tx.card_id && (tx.description ?? "").startsWith("Pagamento Fatura");
 
 const getRangeFromPeriod = (period: PeriodOption, customFrom: string, customTo: string) => {
   const today = new Date();
@@ -111,7 +116,7 @@ const ReportsPage = () => {
       const key = monthKey(tx.date);
       const row = grouped.get(key) ?? { key, label: monthLabel(key), income: 0, expense: 0, balance: 0 };
       if (tx.type === "income") row.income += Number(tx.amount || 0);
-      if (tx.type === "expense") row.expense += Number(tx.amount || 0);
+      if (tx.type === "expense" && !isInvoicePayment(tx)) row.expense += Number(tx.amount || 0);
       row.balance = row.income - row.expense;
       grouped.set(key, row);
     });
@@ -123,7 +128,7 @@ const ReportsPage = () => {
     if (dayDiff <= 95) {
       const byDay = new Map<string, number>();
       rows.forEach((tx) => {
-        const delta = tx.type === "income" ? Number(tx.amount || 0) : tx.type === "expense" ? Number(tx.amount || 0) * -1 : 0;
+        const delta = tx.type === "income" ? Number(tx.amount || 0) : tx.type === "expense" && !isInvoicePayment(tx) ? Number(tx.amount || 0) * -1 : 0;
         byDay.set(tx.date, (byDay.get(tx.date) ?? 0) + delta);
       });
       let running = 0;
@@ -142,7 +147,7 @@ const ReportsPage = () => {
 
   const categoryExpenses = useMemo(() => {
     const grouped = new Map<string, { id: string; category: string; color: string; value: number }>();
-    rows.filter((tx) => tx.type === "expense").forEach((tx) => {
+    rows.filter((tx) => tx.type === "expense" && !isInvoicePayment(tx)).forEach((tx) => {
       const cat = asSingle(tx.categories);
       const id = tx.category_id || cat?.id || "none";
       const entry = grouped.get(id) ?? {

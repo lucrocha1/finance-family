@@ -617,6 +617,9 @@ const DashboardPage = () => {
     // the invoice payment does, as a single event on its due date.
     transactions
       .filter((tx) => !tx.card_id)
+      // Exclui transferências: são neutras ao caixa total, mas geram 2 rows
+      // (out/in) que caíam ambas no ramo -amount, subtraindo 2x do fluxo (F59).
+      .filter((tx) => tx.type === "income" || tx.type === "expense")
       .filter((tx) => (flowTab === "realized" ? tx.status === "paid" : tx.status === "paid" || tx.status === "pending" || tx.status === null))
       .forEach((tx) => {
         const day = new Date(`${tx.date}T00:00:00`).getDate();
