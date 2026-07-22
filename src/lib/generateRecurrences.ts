@@ -88,7 +88,7 @@ const daysFromTodayToIso = (horizonIso: string): number => {
 // delega na RPC security definer porque RLS impede insert com
 // user_id alheio.
 export const generateRecurrencesForFamily = async (
-  familyId: string,
+  _familyId: string,
   authUserId: string,
   targetEndIso?: string | null,
 ): Promise<{ created: number }> => {
@@ -101,7 +101,8 @@ export const generateRecurrencesForFamily = async (
     .select(
       "id, family_id, user_id, type, description, amount, date, notes, category_id, account_id, card_id, recurrence_type, recurrence_end_date, recurrence_day, linked_user_id, linked_pair_id",
     )
-    .eq("family_id", familyId)
+    // RLS (user_id=auth.uid()) já isola; filtrar por family_id escondia parents
+    // recorrentes com family_id defasado, e a geração parava para eles.
     .eq("is_recurring", true)
     .is("recurrence_parent_id", null)
     .or(`recurrence_end_date.is.null,recurrence_end_date.gte.${today}`);

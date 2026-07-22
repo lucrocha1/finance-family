@@ -92,37 +92,44 @@ const toISODate = (date: Date) => new Date(date.getTime() - date.getTimezoneOffs
 const formatDateDDMM = (iso: string) => new Date(`${iso}T00:00:00`).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
 const PAGE_SIZE = 20;
 
-const formSchema = z
-  .object({
-    type: z.enum(["income", "expense", "transfer"]),
-    description: z.string().trim().min(2).max(120),
-    amountCents: z.number().int().min(1),
-    date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-    status: z.enum(["paid", "pending"]),
-    categoryId: z.string().nullable(),
-    accountId: z.string().nullable(),
-    fromAccountId: z.string().nullable(),
-    toAccountId: z.string().nullable(),
-    cardId: z.string().nullable(),
-    isInstallment: z.boolean(),
-    installments: z.number().int().min(2).max(48),
-    isRecurring: z.boolean(),
-    recurrenceType: z.enum(["weekly", "monthly", "yearly"]),
-    notes: z.string().trim().max(600).optional(),
-  })
-  .superRefine((values, ctx) => {
-    if (values.type !== "transfer" && !values.categoryId) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["categoryId"], message: "Categoria obrigatória" });
-    if (values.type === "transfer") {
-      if (!values.fromAccountId) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["fromAccountId"], message: "Conta origem obrigatória" });
-      if (!values.toAccountId) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["toAccountId"], message: "Conta destino obrigatória" });
-      if (values.fromAccountId && values.toAccountId && values.fromAccountId === values.toAccountId) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["toAccountId"], message: "Contas devem ser diferentes" });
-    }
-    if (values.type === "expense" && !values.cardId && !values.accountId) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["accountId"], message: "Conta obrigatória" });
-    if (values.type === "income" && !values.accountId) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["accountId"], message: "Conta obrigatória" });
-  });
+// Fábrica: na EDIÇÃO de transferência o form não exibe os selects de conta
+// (elas não mudam), então exigir origem/destino aqui travava qualquer edição de
+// transferência. As contas só são obrigatórias na CRIAÇÃO.
+const makeFormSchema = (isEditing: boolean) =>
+  z
+    .object({
+      type: z.enum(["income", "expense", "transfer"]),
+      description: z.string().trim().min(2).max(120),
+      amountCents: z.number().int().min(1),
+      date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      status: z.enum(["paid", "pending"]),
+      categoryId: z.string().nullable(),
+      accountId: z.string().nullable(),
+      fromAccountId: z.string().nullable(),
+      toAccountId: z.string().nullable(),
+      cardId: z.string().nullable(),
+      isInstallment: z.boolean(),
+      installments: z.number().int().min(2).max(48),
+      isRecurring: z.boolean(),
+      recurrenceType: z.enum(["weekly", "monthly", "yearly"]),
+      notes: z.string().trim().max(600).optional(),
+    })
+    .superRefine((values, ctx) => {
+      if (values.type !== "transfer" && !values.categoryId) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["categoryId"], message: "Categoria obrigatória" });
+      if (values.type === "transfer" && !isEditing) {
+        if (!values.fromAccountId) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["fromAccountId"], message: "Conta origem obrigatória" });
+        if (!values.toAccountId) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["toAccountId"], message: "Conta destino obrigatória" });
+        if (values.fromAccountId && values.toAccountId && values.fromAccountId === values.toAccountId) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["toAccountId"], message: "Contas devem ser diferentes" });
+      }
+      if (values.type === "expense" && !values.cardId && !values.accountId) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["accountId"], message: "Conta obrigatória" });
+      if (values.type === "income" && !values.accountId) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["accountId"], message: "Conta obrigatória" });
+    });
 
 const getComputedStatus = (tx: TransactionRow): "paid" | "pending" | "overdue" => {
   if (tx.status === "paid") return "paid";
+  // Compras de cartão nunca são "atrasadas" pela data da COMPRA — o vencimento
+  // efetivo é o da fatura. Ficam sempre "pendentes" até a fatura ser paga.
+  if (tx.card_id) return "pending";
   const todayIso = toISODate(new Date());
   if (tx.date < todayIso) return "overdue";
   return "pending";
@@ -247,7 +254,6 @@ const TransactionsPage = () => {
       supabase
         .from("transactions")
         .select("card_id, amount, date, status")
-        .eq("family_id", family.id)
         .eq("type", "expense")
         .not("card_id", "is", null)
         .gte("date", cardRangeStart)
@@ -255,7 +261,6 @@ const TransactionsPage = () => {
       supabase
         .from("transactions")
         .select("type, amount, date, status")
-        .eq("family_id", family.id)
         .neq("status", "paid")
         .is("card_id", null)
         .gte("date", todayIso)
@@ -263,7 +268,6 @@ const TransactionsPage = () => {
       supabase
         .from("debts")
         .select("status, direction, due_date, total_with_interest, original_amount, amount_paid, has_installments, installment_amount")
-        .eq("family_id", family.id)
         .eq("status", "active")
         .not("due_date", "is", null)
         .gte("due_date", todayIso)
@@ -523,7 +527,7 @@ const TransactionsPage = () => {
   const persist = async () => {
     const ctx = ensureFamily(family?.id, user?.id);
     if (!ctx) return;
-    const parsed = formSchema.safeParse({
+    const parsed = makeFormSchema(Boolean(editing)).safeParse({
       type: formType,
       description,
       amountCents,
@@ -585,20 +589,22 @@ const TransactionsPage = () => {
           .order("installment_current", { ascending: true });
         if (error) errorMessage = error.message;
         if (!error && rows) {
-          const count = rows.length;
-          const totalCents = parsed.data.amountCents;
-          const baseCents = Math.floor(totalCents / count);
-          const remainder = totalCents % count;
-          const updates = rows.map((row, index) =>
+          // O campo de valor já mostra o valor de UMA parcela (openEdit carrega
+          // tx.amount). "Editar todas" aplica esse mesmo valor a cada parcela —
+          // não divide por N (antes dividia o valor de uma parcela por N,
+          // colapsando o total).
+          const perInstallment = parsed.data.amountCents / 100;
+          const updates = rows.map((row) =>
             supabase
               .from("transactions")
               .update({
                 description: parsed.data.description.trim(),
-                amount: (baseCents + (index < remainder ? 1 : 0)) / 100,
+                amount: perInstallment,
                 category_id: base.category_id,
                 account_id: base.account_id,
                 card_id: base.card_id,
                 notes: base.notes,
+                tags: base.tags,
                 status: base.status,
               })
               .eq("id", row.id),
@@ -618,6 +624,7 @@ const TransactionsPage = () => {
             amount: base.amount,
             date: base.date,
             notes: base.notes,
+            tags: base.tags,
             status: base.status,
           })
           .eq("transfer_group_id", editing.transfer_group_id);
@@ -633,6 +640,7 @@ const TransactionsPage = () => {
             account_id: base.account_id,
             card_id: base.card_id,
             notes: base.notes,
+            tags: base.tags,
             status: base.status,
           })
           .eq("id", editing.id);
@@ -827,6 +835,16 @@ const TransactionsPage = () => {
       return;
     }
 
+    // "Excluir esta e as futuras": encerra a recorrência no pai gravando
+    // recurrence_end_date logo antes da data removida. Sem isso o gerador
+    // (generateRecurrencesForFamily) reinsere as ocorrências apagadas na próxima
+    // navegação, pois o pai continua is_recurring sem data de término.
+    if (isRecurringTarget && recurrenceRootId && mode === "remaining") {
+      const prevDay = toISODate(new Date(new Date(`${deleteTarget.date}T00:00:00`).getTime() - 86400000));
+      await supabase.from("transactions").update({ recurrence_end_date: prevDay }).eq("id", recurrenceRootId);
+      invalidateRecurrenceHorizon();
+    }
+
     setDeleteOpen(false);
     setDeleteTarget(null);
     if (editing?.id === deleteTarget.id) {
@@ -838,6 +856,13 @@ const TransactionsPage = () => {
   };
 
   const markPaid = async (tx: TransactionRow) => {
+    // Compra de cartão NÃO é quitada individualmente: marcar 'paid' aqui liberaria
+    // o limite e reduziria a fatura sem debitar conta nenhuma. Só o fluxo "Pagar
+    // Fatura" (em /cards/:id) deve quitá-la.
+    if (tx.card_id && tx.type === "expense") {
+      toast.info("Compras de cartão são quitadas ao pagar a fatura do cartão.");
+      return;
+    }
     // Transferência: marca as DUAS pernas como pagas juntas (F16); senão o
     // trigger aplica o efeito de saldo de um lado só e o total fica errado.
     const updateQuery = supabase.from("transactions").update({ status: "paid" });
@@ -1069,9 +1094,9 @@ const TransactionsPage = () => {
       {listView === "transactions" && (<>
       <div className="flex flex-wrap items-center gap-3">
         <div className="flex items-center justify-between rounded-xl border border-border bg-card px-2 py-1.5">
-          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setSelectedMonth((prev) => new Date(prev.getFullYear(), prev.getMonth() - 1, 1))}><ChevronLeft className="h-4 w-4" /></Button>
+          <Button variant="ghost" size="icon" aria-label="Mês anterior" className="h-8 w-8" onClick={() => setSelectedMonth((prev) => new Date(prev.getFullYear(), prev.getMonth() - 1, 1))}><ChevronLeft className="h-4 w-4" /></Button>
           <p className="min-w-[150px] text-center text-sm font-bold text-foreground">{capitalize(formatMonthYear(selectedMonth))}</p>
-          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setSelectedMonth((prev) => new Date(prev.getFullYear(), prev.getMonth() + 1, 1))}><ChevronRight className="h-4 w-4" /></Button>
+          <Button variant="ghost" size="icon" aria-label="Próximo mês" className="h-8 w-8" onClick={() => setSelectedMonth((prev) => new Date(prev.getFullYear(), prev.getMonth() + 1, 1))}><ChevronRight className="h-4 w-4" /></Button>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
@@ -1148,7 +1173,7 @@ const TransactionsPage = () => {
                         </TableCell>
                         <TableCell className="px-4 py-3 text-sm text-muted-foreground">{tx.card_id ? <span className="inline-flex items-center gap-1"><CreditCard className="h-3.5 w-3.5" />{card?.name || "Cartão"}</span> : account?.name || "Sem conta"}</TableCell>
                         <TableCell className="px-4 py-3 text-sm text-muted-foreground"><span className="inline-flex items-center gap-2"><span className="flex h-6 w-6 items-center justify-center rounded-full bg-secondary text-[11px] font-bold text-foreground">{memberInitials}</span><span className="text-foreground">{memberName}</span></span></TableCell>
-                        <TableCell className="px-4 py-3"><div className="flex justify-end gap-2 opacity-0 transition-opacity group-hover:opacity-100"><button type="button" className="text-muted-foreground hover:text-foreground" onClick={(e) => { e.stopPropagation(); openEdit(tx); }}><Pencil className="h-4 w-4" /></button>{computedStatus !== "paid" && <button type="button" className="text-muted-foreground hover:text-success" onClick={(e) => { e.stopPropagation(); void markPaid(tx); }}><CheckCircle className="h-4 w-4" /></button>}<button type="button" className="text-muted-foreground hover:text-foreground" onClick={(e) => { e.stopPropagation(); openDelete(tx); }}><Trash2 className="h-4 w-4" /></button></div></TableCell>
+                        <TableCell className="px-4 py-3"><div className="flex justify-end gap-2 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100"><button type="button" aria-label="Editar transação" className="text-muted-foreground hover:text-foreground" onClick={(e) => { e.stopPropagation(); openEdit(tx); }}><Pencil className="h-4 w-4" /></button>{computedStatus !== "paid" && !(tx.card_id && tx.type === "expense") && <button type="button" aria-label="Marcar como paga" className="text-muted-foreground hover:text-success" onClick={(e) => { e.stopPropagation(); void markPaid(tx); }}><CheckCircle className="h-4 w-4" /></button>}<button type="button" aria-label="Excluir transação" className="text-muted-foreground hover:text-foreground" onClick={(e) => { e.stopPropagation(); openDelete(tx); }}><Trash2 className="h-4 w-4" /></button></div></TableCell>
                       </TableRow>
                     );
                   })}
