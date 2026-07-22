@@ -74,8 +74,8 @@ export const AppLayout = () => {
   const isMobile = useIsMobile();
 
   useEnsureRecurrencesGenerated(family?.id);
-  useEnsureNotificationsGenerated(user?.id);
-  const { items: notifications, unreadCount, markAsRead, markAllAsRead } = useNotifications(user?.id);
+  const { items: notifications, unreadCount, markAsRead, markAllAsRead, reload: reloadNotifications } = useNotifications(user?.id);
+  useEnsureNotificationsGenerated(user?.id, reloadNotifications);
 
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);

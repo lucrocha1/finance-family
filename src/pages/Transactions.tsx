@@ -440,7 +440,9 @@ const TransactionsPage = () => {
 
   const openCreate = () => {
     resetForm();
-    setStatus(toISODate(new Date()) >= toISODate(new Date()) ? "paid" : "pending");
+    // Nova transação nasce com data = hoje, então status "paid". Antes havia uma
+    // comparação toISODate(hoje) >= toISODate(hoje) sempre verdadeira (F57).
+    setStatus("paid");
     setOpen(true);
   };
 
