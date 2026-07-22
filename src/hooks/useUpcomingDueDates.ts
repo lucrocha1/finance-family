@@ -63,7 +63,7 @@ export const useUpcomingDueDates = (familyId: string | null | undefined) => {
         supabase
           .from("debts")
           .select("id, name, total_with_interest, original_amount, due_date, status, direction, has_installments, installment_amount")
-          .neq("status", "paid")
+          .neq("status", "paid_off")
           .not("due_date", "is", null)
           .gte("due_date", today)
           .lte("due_date", end),

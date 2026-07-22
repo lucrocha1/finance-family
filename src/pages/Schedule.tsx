@@ -307,8 +307,8 @@ const SchedulePage = () => {
         .lte("date", toISODate(monthEnd)),
       supabase
         .from("debts")
-        .select("id, name, total_with_interest, original_amount, due_date, status, direction, has_installments, total_installments, installments_paid, installment_amount, start_date")
-        .neq("status", "paid"),
+        .select("id, name, total_with_interest, original_amount, amount_paid, due_date, status, direction, has_installments, total_installments, installments_paid, installment_amount, start_date")
+        .neq("status", "paid_off"),
       supabase.from("cards").select("id, name, closing_day, due_day"),
       supabase
         .from("transactions")
@@ -354,10 +354,16 @@ const SchedulePage = () => {
       if (!hasInstallments) {
         const dueIso = String(d.due_date ?? "");
         if (!dueIso) return [];
+        // Mostra o valor RESTANTE (total - já pago) e omite dívida já quitada.
+        // O filtro status != 'paid_off' na query cobre o caso normal; isto é a
+        // rede de segurança caso o status não tenha sido atualizado.
+        const total = Number((d.total_with_interest as number | null) ?? d.original_amount ?? 0);
+        const remaining = total - Number(d.amount_paid ?? 0);
+        if (remaining <= 0.005) return [];
         return [{
           id: `debt-${d.id}`,
           description: `${verbo}: ${baseLabel}`,
-          amount: Number((d.total_with_interest as number | null) ?? d.original_amount ?? 0),
+          amount: remaining,
           due_date: dueIso,
           type: direction,
           recurrence: "once",
@@ -897,7 +903,7 @@ const SchedulePage = () => {
                       </p>
                     </div>
                     <Button size="sm" className="rounded-md" onClick={() => togglePaid(row)}>
-                      Pagar agora
+                      {normalizeType(row.type) === "receivable" ? "Receber" : "Pagar agora"}
                     </Button>
                   </div>
                 ))}
@@ -954,7 +960,7 @@ const SchedulePage = () => {
 
                         <div className="text-right">
                           {paid ? (
-                            <span className="rounded-md bg-[hsl(var(--success))/0.15] px-2 py-1 text-xs font-semibold text-[hsl(var(--success))]">Pago ✓</span>
+                            <span className="rounded-md bg-[hsl(var(--success))/0.15] px-2 py-1 text-xs font-semibold text-[hsl(var(--success))]">{normalizeType(row.type) === "receivable" ? "Recebido ✓" : "Pago ✓"}</span>
                           ) : overdue ? (
                             <span className="rounded-md bg-destructive/20 px-2 py-1 text-xs font-semibold text-destructive">Atrasado!</span>
                           ) : (
@@ -963,7 +969,7 @@ const SchedulePage = () => {
 
                           <div className="mt-2 flex justify-end gap-1">
                             <Button size="sm" className="h-7 rounded-md px-2 text-xs" variant={paid ? "ghost" : "default"} onClick={() => togglePaid(row)}>
-                              {paid ? "Desfazer" : "Marcar como pago"}
+                              {paid ? "Desfazer" : normalizeType(row.type) === "receivable" ? "Marcar recebido" : "Marcar como pago"}
                             </Button>
                             <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => openEdit(row)}>
                               <Pencil className="h-4 w-4" />

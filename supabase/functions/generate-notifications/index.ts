@@ -129,7 +129,7 @@ const checkDailyDue = async (sb: SupabaseClient, userId: string) => {
     sb.from("scheduled_payments").select("id, description, amount, type")
       .eq("user_id", userId).eq("is_paid", false).eq("due_date", tdy),
     sb.from("debts").select("id, name, total_with_interest, original_amount, direction")
-      .eq("user_id", userId).neq("status", "paid").eq("due_date", tdy),
+      .eq("user_id", userId).neq("status", "paid_off").eq("due_date", tdy),
   ]);
   const total =
     (tx.data ?? []).reduce((s: number, t: any) => s + Number(t.amount || 0), 0) +
@@ -161,7 +161,7 @@ const checkWeeklySummary = async (sb: SupabaseClient, userId: string) => {
       .eq("user_id", userId).eq("is_paid", false)
       .gte("due_date", start).lte("due_date", endIso),
     sb.from("debts").select("total_with_interest, original_amount, direction")
-      .eq("user_id", userId).neq("status", "paid").not("due_date", "is", null)
+      .eq("user_id", userId).neq("status", "paid_off").not("due_date", "is", null)
       .gte("due_date", start).lte("due_date", endIso),
   ]);
   const total =
@@ -267,7 +267,7 @@ const checkOverdueDebts = async (sb: SupabaseClient, userId: string) => {
   const tdy = today();
   const { data } = await sb.from("debts")
     .select("id, name, due_date, total_with_interest, original_amount, direction")
-    .eq("user_id", userId).neq("status", "paid").not("due_date", "is", null)
+    .eq("user_id", userId).neq("status", "paid_off").not("due_date", "is", null)
     .lt("due_date", tdy);
   const items: Notif[] = (data ?? []).map((d: any) => ({
     user_id: userId,
