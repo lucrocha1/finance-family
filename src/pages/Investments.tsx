@@ -89,7 +89,7 @@ const formSchema = z
     name: z.string().trim().min(2, "Nome obrigatório").max(120, "Máximo de 120 caracteres"),
     type: z.enum(["stocks", "crypto", "fixed_income", "fund", "savings", "real_estate", "other"]),
     amountInvestedCents: z.number().int().min(1, "Valor investido obrigatório"),
-    currentValueCents: z.number().int().min(1, "Valor atual obrigatório"),
+    currentValueCents: z.number().int().min(0, "Valor atual inválido"),
     targetValueCents: z.number().int().min(0),
     targetDate: z.string().nullable(),
     institution: z.string().trim().max(100).optional(),
@@ -349,7 +349,8 @@ const InvestmentsPage = () => {
 
   const saveQuickUpdate = async (itemId: string) => {
     const cents = Number(quickValueDigits || "0");
-    if (cents <= 0) {
+    // Permite 0 pra registrar perda total (cripto zerada, ação delistada) — F29.
+    if (cents < 0) {
       toast.error("Informe um valor atual válido");
       return;
     }
@@ -543,7 +544,7 @@ const InvestmentsPage = () => {
                   <div key={item.type} className="flex items-center gap-2">
                     <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: item.fill }} />
                     <span className="text-muted-foreground">{item.label}</span>
-                    <span className="font-semibold text-foreground">{item.pct.toFixed(1)}%</span>
+                    <span className="font-semibold text-foreground">{formatPct(item.pct)}%</span>
                   </div>
                 ))
               )}

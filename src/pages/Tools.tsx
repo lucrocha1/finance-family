@@ -6,6 +6,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ptCurrency } from "@/lib/formatting";
 
+// Parse de número no formato brasileiro: remove os pontos de milhar e troca a
+// vírgula decimal por ponto. Antes, Number(x.replace(",", ".")) interpretava
+// "10.000" (dez mil) como 10 (o ponto virava decimal) — F4.
+const parseBRNumber = (v: string) => Number(String(v).replace(/\./g, "").replace(",", ".")) || 0;
+
 const ToolsPage = () => {
   return (
     <div className="space-y-5">
@@ -30,9 +35,9 @@ const CompoundInterest = () => {
   const [months, setMonths] = useState("12");
 
   const result = useMemo(() => {
-    const P = Number(initial.replace(",", ".")) || 0;
-    const PMT = Number(monthly.replace(",", ".")) || 0;
-    const i = (Number(rate.replace(",", ".")) || 0) / 100;
+    const P = parseBRNumber(initial);
+    const PMT = parseBRNumber(monthly);
+    const i = parseBRNumber(rate) / 100;
     const n = Number(months) || 0;
 
     let total = P;
@@ -99,8 +104,8 @@ const LoanSimulator = () => {
   const [months, setMonths] = useState("12");
 
   const result = useMemo(() => {
-    const P = Number(principal.replace(",", ".")) || 0;
-    const i = (Number(rate.replace(",", ".")) || 0) / 100;
+    const P = parseBRNumber(principal);
+    const i = parseBRNumber(rate) / 100;
     const n = Number(months) || 1;
     if (P <= 0 || n <= 0) return { installment: 0, total: 0, interest: 0 };
     if (i === 0) return { installment: P / n, total: P, interest: 0 };

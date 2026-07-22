@@ -160,8 +160,20 @@ const parseDateByFormat = (value: string, format: DateFormat) => {
 };
 
 const parseAmount = (value: string, mode: DecimalSeparator) => {
-  const trimmed = value.trim();
+  let trimmed = value.trim();
   if (!trimmed) return null;
+
+  // Sinal negativo à direita ("150,00-") ou parênteses contábeis ("(150,00)")
+  // marcam débito em vários extratos BR — normaliza pro sinal à esquerda (F36).
+  let negative = false;
+  if (/^\(.*\)$/.test(trimmed)) {
+    negative = true;
+    trimmed = trimmed.slice(1, -1);
+  }
+  if (/-\s*$/.test(trimmed)) {
+    negative = true;
+    trimmed = trimmed.replace(/-\s*$/, "");
+  }
 
   const normalized =
     mode === "comma"
@@ -170,7 +182,7 @@ const parseAmount = (value: string, mode: DecimalSeparator) => {
 
   const numeric = Number(normalized.replace(/[^0-9.-]/g, ""));
   if (Number.isNaN(numeric)) return null;
-  return numeric;
+  return negative ? -Math.abs(numeric) : numeric;
 };
 
 const STEP_ITEMS = [
@@ -285,6 +297,22 @@ const ImportCsvPage = () => {
         };
       }
 
+      if (parsedAmount === 0) {
+        // Valor zero não é receita nem despesa — sinaliza como erro em vez de
+        // classificar como receita de R$ 0,00 (F35).
+        return {
+          index: lineIndex,
+          raw,
+          date: parsedDate,
+          description: descriptionCell || null,
+          amount: 0,
+          type: null,
+          categoryName: categoryCell || null,
+          status: "error",
+          error: "Valor zero",
+        };
+      }
+
       if (!descriptionCell.trim()) {
         return {
           index: lineIndex,
@@ -352,9 +380,9 @@ const ImportCsvPage = () => {
       expensesCount: expenses.length,
       incomesTotal,
       expensesTotal,
-      importable: ignoreErrors ? okRows.length : parsedRows.length,
+      importable: okRows.length,
     };
-  }, [parsedRows, ignoreErrors]);
+  }, [parsedRows]);
 
   const previewRows = useMemo(() => parsedRows.slice(0, 3), [parsedRows]);
 
@@ -392,7 +420,20 @@ const ImportCsvPage = () => {
       return;
     }
 
-    const text = await incoming.text();
+    // Detecta encoding: lê os bytes e tenta UTF-8; se aparecer o caractere de
+    // substituição (U+FFFD), refaz como Windows-1252/Latin-1 — comum em extratos
+    // de bancos BR exportados pelo Excel. Antes, .text() assumia sempre UTF-8 e
+    // corrompia acentos (F33).
+    const buffer = await incoming.arrayBuffer();
+    const bytes = new Uint8Array(buffer);
+    let text = new TextDecoder("utf-8").decode(bytes);
+    if (text.includes("�")) {
+      try {
+        text = new TextDecoder("windows-1252").decode(bytes);
+      } catch {
+        /* mantém UTF-8 se o runtime não suportar windows-1252 */
+      }
+    }
     const nextDelimiter = detectDelimiter(text);
 
     setFile(incoming);
@@ -435,8 +476,16 @@ const ImportCsvPage = () => {
   const executeImport = async () => {
     if (!family?.id || !user?.id || !file || !selectedAccountId) return;
 
-    const rowsToInsert = ignoreErrors ? parsedRows.filter((row) => row.status === "ok") : parsedRows;
-    const validRows = rowsToInsert.filter((row) => row.status === "ok" && row.date && row.description && row.amount !== null && row.type);
+    // "Ignorar linhas com erro" desmarcado = tudo-ou-nada: se houver QUALQUER
+    // linha com erro, bloqueia em vez de importar só as válidas silenciosamente,
+    // contrariando a escolha do usuário (F34).
+    const errorCount = parsedRows.filter((row) => row.status === "error").length;
+    if (!ignoreErrors && errorCount > 0) {
+      toast.error(`${errorCount} linha(s) com erro. Corrija-as ou marque "Ignorar linhas com erro".`);
+      return;
+    }
+
+    const validRows = parsedRows.filter((row) => row.status === "ok" && row.date && row.description && row.amount !== null && row.type);
 
     if (!validRows.length) {
       toast.error("Não há linhas válidas para importar");
@@ -445,7 +494,37 @@ const ImportCsvPage = () => {
 
     setImporting(true);
 
-    const payload = validRows.map((row) => ({
+    // Deduplicação (F31): busca transações já existentes na conta no intervalo de
+    // datas do arquivo e pula linhas com mesma (date, amount, type, description).
+    // Reimportar o mesmo extrato (ou um com período sobreposto) não duplica mais.
+    const dates = validRows.map((row) => row.date as string).sort();
+    const { data: existingTx } = await supabase
+      .from("transactions")
+      .select("date, amount, type, description")
+      .eq("account_id", selectedAccountId)
+      .gte("date", dates[0])
+      .lte("date", dates[dates.length - 1]);
+    const keyOf = (d: string, a: number, t: string, desc: string | null) =>
+      `${d}|${Number(a).toFixed(2)}|${t}|${(desc ?? "").trim().toLowerCase()}`;
+    const existingKeys = new Set(
+      (existingTx ?? []).map((t: { date: string; amount: number; type: string; description: string | null }) =>
+        keyOf(t.date, Number(t.amount), t.type, t.description),
+      ),
+    );
+    const dedupedRows = validRows.filter((row) => {
+      const key = keyOf(row.date as string, Number(row.amount), row.type as string, row.description);
+      if (existingKeys.has(key)) return false;
+      existingKeys.add(key); // também deduplica dentro do próprio arquivo
+      return true;
+    });
+
+    if (!dedupedRows.length) {
+      setImporting(false);
+      toast.info("Todas as transações do arquivo já existem na conta — nada a importar.");
+      return;
+    }
+
+    const payload = dedupedRows.map((row) => ({
       description: row.description,
       amount: row.amount,
       type: row.type,
@@ -458,7 +537,7 @@ const ImportCsvPage = () => {
 
     const { error: insertTxError } = await supabase.from("transactions").insert(payload);
 
-    const ignored = parsedRows.length - validRows.length;
+    const ignored = parsedRows.length - dedupedRows.length;
     const mappingPayload = {
       ...mapping,
       delimiter,
@@ -495,7 +574,7 @@ const ImportCsvPage = () => {
     await supabase.from("csv_imports").insert({
       filename: file.name,
       status: "done",
-      rows_imported: validRows.length,
+      rows_imported: dedupedRows.length,
       rows_total: parsedRows.length,
       column_mapping: mappingPayload,
       account_id: selectedAccountId,
@@ -505,7 +584,7 @@ const ImportCsvPage = () => {
 
     setResult({
       status: "success",
-      imported: validRows.length,
+      imported: dedupedRows.length,
       ignored,
     });
 
