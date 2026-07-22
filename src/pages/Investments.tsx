@@ -108,7 +108,7 @@ const formatDate = (iso: string | null) => (iso ? new Date(`${iso}T00:00:00`).to
 const formatPct = (value: number) => value.toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 
 const InvestmentsPage = () => {
-  const { family, members } = useFamily();
+  const { family } = useFamily();
   const { user } = useAuth();
 
   const [loading, setLoading] = useState(true);
@@ -122,7 +122,6 @@ const InvestmentsPage = () => {
 
   const [sortBy, setSortBy] = useState<SortOption>("highest_value");
   const [typeFilter, setTypeFilter] = useState<"all" | InvestmentType>("all");
-  const [memberFilter, setMemberFilter] = useState("all");
 
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -188,15 +187,6 @@ const InvestmentsPage = () => {
     void loadData();
   }, [loadData]);
 
-  const memberMap = useMemo(() => {
-    const map = new Map<string, string>();
-    members.forEach((member) => {
-      const nameLabel = member.profiles?.full_name?.trim() || member.profiles?.email || "Usuário";
-      map.set(member.user_id, nameLabel);
-    });
-    return map;
-  }, [members]);
-
   const summary = useMemo(() => {
     const invested = investments.reduce((sum, item) => sum + Number(item.amount_invested || 0), 0);
     const current = investments.reduce((sum, item) => sum + Number(item.current_value || 0), 0);
@@ -226,7 +216,6 @@ const InvestmentsPage = () => {
   const filteredAndSorted = useMemo(() => {
     const filtered = investments.filter((item) => {
       if (typeFilter !== "all" && item.type !== typeFilter) return false;
-      if (memberFilter !== "all" && item.user_id !== memberFilter) return false;
       return true;
     });
 
@@ -240,7 +229,7 @@ const InvestmentsPage = () => {
       if (sortBy === "name_az") return a.name.localeCompare(b.name, "pt-BR");
       return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
     });
-  }, [investments, memberFilter, sortBy, typeFilter]);
+  }, [investments, sortBy, typeFilter]);
 
   const resetForm = () => {
     setEditing(null);
@@ -481,20 +470,6 @@ const InvestmentsPage = () => {
               ))}
             </SelectContent>
           </Select>
-
-          <Select value={memberFilter} onValueChange={setMemberFilter}>
-            <SelectTrigger className="h-10 w-[190px] rounded-lg border-border bg-card">
-              <SelectValue placeholder="Membro" />
-            </SelectTrigger>
-            <SelectContent className="border-border bg-card text-card-foreground">
-              <SelectItem value="all">Todos</SelectItem>
-              {members.map((member) => (
-                <SelectItem key={member.user_id} value={member.user_id}>
-                  {member.profiles?.full_name?.trim() || member.profiles?.email || "Usuário"}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
         </div>
 
         <Button onClick={openCreate} className="h-10 rounded-lg font-semibold">
@@ -678,7 +653,6 @@ const InvestmentsPage = () => {
                 <div className="mt-4 space-y-2 border-t border-border pt-3">
                   {item.notes ? <p className="truncate text-xs italic text-[hsl(var(--section-label))]">{item.notes}</p> : null}
                   <p className="text-xs text-muted-foreground">Adicionado em {new Date(item.created_at).toLocaleDateString("pt-BR")}</p>
-                  <p className="text-xs text-muted-foreground">Responsável: {memberMap.get(item.user_id) ?? "Usuário"}</p>
                 </div>
 
                 <div className="mt-3 flex items-center gap-1">

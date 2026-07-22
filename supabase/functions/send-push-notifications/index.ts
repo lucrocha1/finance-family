@@ -71,6 +71,36 @@ Deno.serve(async (req: Request) => {
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
   );
 
+  // Autorização (F41/F48): só o backend (service role) pode enviar push pra um
+  // user_id arbitrário. Um usuário autenticado só pode disparar pra si mesmo.
+  // Sem isso, qualquer usuário logado poderia enviar push arbitrário (título,
+  // corpo e link controlados) pros dispositivos de outro usuário — IDOR/spoofing
+  // com potencial de phishing (o SW navega pro `link` no clique).
+  const authHeader = req.headers.get("Authorization") ?? "";
+  const token = authHeader.replace(/^Bearer\s+/i, "").trim();
+  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+  if (token !== serviceKey) {
+    if (!token) {
+      return new Response(JSON.stringify({ ok: false, error: "unauthorized" }), {
+        status: 401,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    const { data: userData, error: userErr } = await sb.auth.getUser(token);
+    if (userErr || !userData?.user) {
+      return new Response(JSON.stringify({ ok: false, error: "invalid token" }), {
+        status: 401,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    if (userData.user.id !== payload.user_id) {
+      return new Response(JSON.stringify({ ok: false, error: "forbidden" }), {
+        status: 403,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+  }
+
   const { data: subs, error } = await sb
     .from("push_subscriptions")
     .select("id, endpoint, p256dh, auth")

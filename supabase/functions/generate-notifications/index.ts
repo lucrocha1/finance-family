@@ -68,25 +68,27 @@ const dispatchPush = async (item: Notif) => {
 
 const insertNotifications = async (sb: SupabaseClient, items: Notif[]) => {
   if (items.length === 0) return;
-  // Lemos o que já existe pra detectar quais foram realmente inseridas
-  // (evita disparar push pra notificação que já existia em iterações anteriores).
-  const dedupKeys = items.map((i) => i.dedup_key).filter((k): k is string => Boolean(k));
-  const { data: existing } = dedupKeys.length > 0
-    ? await sb.from("notifications").select("dedup_key").in("dedup_key", dedupKeys)
-    : { data: [] as { dedup_key: string }[] };
-  const existingSet = new Set((existing ?? []).map((row) => row.dedup_key));
-  const fresh = items.filter((i) => !i.dedup_key || !existingSet.has(i.dedup_key));
-
-  const { error } = await sb.from("notifications").upsert(items, {
-    onConflict: "user_id,dedup_key",
-    ignoreDuplicates: true,
-  });
+  // Insere de forma idempotente (ON CONFLICT DO NOTHING) e recupera SOMENTE as
+  // linhas realmente inseridas via RETURNING (.select()). O push é disparado só
+  // pra essas. Substitui o antigo read-then-write, que tinha dois defeitos:
+  //  - F47: a leitura de `existing` filtrava apenas por dedup_key (sem user_id),
+  //    então chaves não escopadas por usuário (daily_due / weekly_summary /
+  //    recurrence_generated) suprimiam o push de todos, menos o 1º usuário
+  //    processado, cuja linha já "existia" pra os demais.
+  //  - F52: entre a leitura e a escrita havia corrida; duas execuções
+  //    concorrentes (cron + hook do front no mesmo instante) viam `existing`
+  //    vazio e ambas disparavam push -> push duplicado.
+  // Com ON CONFLICT DO NOTHING + RETURNING, o banco decide atomicamente o que é
+  // novo, por (user_id, dedup_key), eliminando ambos os problemas.
+  const { data: inserted, error } = await sb
+    .from("notifications")
+    .upsert(items, { onConflict: "user_id,dedup_key", ignoreDuplicates: true })
+    .select("user_id, title, body, link_to, severity");
   if (error) {
     console.error("[notify] insert failed:", error.message);
     return;
   }
-  // Push só pras realmente novas
-  await Promise.all(fresh.map(dispatchPush));
+  await Promise.all((inserted ?? []).map((row) => dispatchPush(row as Notif)));
 };
 
 // ---- Snapshots de investimentos ----
