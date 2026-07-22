@@ -6,7 +6,6 @@ import {
   ArrowRight,
   ArrowUpCircle,
   CalendarCheck2,
-  Check,
   Pencil,
   Trash2,
 } from "lucide-react";
@@ -60,6 +59,16 @@ type ScheduledRow = {
   source?: "scheduled" | "transaction" | "debt" | "card_closing" | "card_due";
   source_id?: string;
 };
+
+// Tipos de evento — legenda do calendário + cor das pills.
+const EVENT_KINDS = [
+  { key: "receivable", label: "A Receber", color: "#22c55e" },
+  { key: "payable", label: "A Pagar", color: "#ef4444" },
+  { key: "debt", label: "Dívida", color: "#eab308" },
+  { key: "invoice", label: "Fatura", color: "#8b5cf6" },
+  { key: "task", label: "Compromisso", color: "#38bdf8" },
+] as const;
+const KIND_COLOR: Record<string, string> = Object.fromEntries(EVENT_KINDS.map((k) => [k.key, k.color]));
 
 const buildCardEvents = (
   cards: Array<{ id: string; name: string; closing_day: number | null; due_day: number | null }>,
@@ -713,108 +722,141 @@ const SchedulePage = () => {
     await loadData();
   };
 
+  const monthTitleCap = monthTitle.format(viewMonth).replace(/^./, (l) => l.toUpperCase());
+  const todayNow = new Date();
+  const badgeMon = todayNow.toLocaleDateString("pt-BR", { month: "short" }).replace(".", "").toUpperCase();
+  const fmtDM = (d: Date) => d.toLocaleDateString("pt-BR", { day: "numeric", month: "short" }).replace(".", "");
+  const rangeLabel = `${fmtDM(startOfMonth(viewMonth))} – ${fmtDM(endOfMonth(viewMonth))}, ${viewMonth.getFullYear()}`;
+  const prevMonth = () => setViewMonth((prev) => startOfMonth(new Date(prev.getFullYear(), prev.getMonth() - 1, 1)));
+  const nextMonth = () => setViewMonth((prev) => startOfMonth(new Date(prev.getFullYear(), prev.getMonth() + 1, 1)));
+  const goToday = () => { setViewMonth(startOfMonth(new Date())); setSelectedDate(todayIso()); };
+
   return (
     <div className="space-y-5">
-      <div className="flex items-center justify-end">
-        <Button onClick={openCreate} className="h-10 rounded-lg font-semibold">
-          + Novo Compromisso
-        </Button>
-      </div>
-
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[3fr_2fr]">
-        <section className="rounded-xl border p-5" style={{ backgroundColor: "#12121a", borderColor: "#1e1e2e" }}>
-          <div className="mb-4 flex items-center justify-center gap-3">
-            <Button
-              size="icon"
-              variant="ghost"
-              className="h-8 w-8"
-              onClick={() => setViewMonth((prev) => startOfMonth(new Date(prev.getFullYear(), prev.getMonth() - 1, 1)))}
-            >
+      {/* Header estilo Vorne: badge de data + título + navegação + novo */}
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div className="flex items-center gap-4">
+          <div className="flex w-16 flex-col items-center justify-center rounded-xl border border-border bg-card py-1.5">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{badgeMon}</span>
+            <span className="metric-value text-2xl font-bold leading-none text-foreground">{todayNow.getDate()}</span>
+          </div>
+          <div>
+            <h2 className="text-xl font-bold tracking-tight text-foreground">{monthTitleCap}</h2>
+            <p className="text-sm text-muted-foreground">{rangeLabel}</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="inline-flex overflow-hidden rounded-lg border border-border">
+            <Button size="icon" variant="ghost" className="h-9 w-9 rounded-none" onClick={prevMonth} aria-label="Mês anterior">
               <ArrowLeft className="h-4 w-4" />
             </Button>
-            <p className="text-lg font-semibold text-foreground">{monthTitle.format(viewMonth).replace(/^./, (l) => l.toUpperCase())}</p>
-            <Button
-              size="icon"
-              variant="ghost"
-              className="h-8 w-8"
-              onClick={() => setViewMonth((prev) => startOfMonth(new Date(prev.getFullYear(), prev.getMonth() + 1, 1)))}
-            >
+            <button type="button" onClick={goToday} className="border-x border-border px-4 text-sm font-semibold text-foreground transition-colors hover:bg-muted/40">
+              Hoje
+            </button>
+            <Button size="icon" variant="ghost" className="h-9 w-9 rounded-none" onClick={nextMonth} aria-label="Próximo mês">
               <ArrowRight className="h-4 w-4" />
             </Button>
           </div>
+          <Button onClick={openCreate} className="h-9 gap-1.5 rounded-lg font-semibold">+ Novo compromisso</Button>
+        </div>
+      </div>
 
+      {/* Legenda de tipos */}
+      <div className="flex flex-wrap gap-2">
+        {EVENT_KINDS.map((k) => (
+          <span key={k.key} className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card/60 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+            <span className="h-2 w-2 rounded-full" style={{ backgroundColor: k.color }} />
+            {k.label}
+          </span>
+        ))}
+      </div>
+
+      <div className="space-y-4">
+        <div className="glass-card overflow-hidden rounded-xl border border-border">
           <div className="grid grid-cols-7 border-b border-border/60">
-            {["D", "S", "T", "Q", "Q", "S", "S"].map((letter, index) => (
-              <div key={`${letter}-${index}`} className="py-2 text-center text-xs font-semibold uppercase text-muted-foreground">
-                {letter}
+            {["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"].map((d) => (
+              <div key={d} className="border-r border-border/60 py-2.5 text-center text-xs font-semibold uppercase tracking-wide text-muted-foreground last:border-r-0">
+                {d}
               </div>
             ))}
           </div>
 
-          <div className="grid grid-cols-7 border-l border-t border-border/60">
+          <div className="grid grid-cols-7">
             {monthGrid.map((date) => {
               const iso = toISODate(date);
               const inMonth = date.getMonth() === viewMonth.getMonth();
               const selected = iso === selectedDate;
               const isToday = iso === todayIso();
               const rows = rowsByDate.get(iso) ?? [];
-              const overdue = rows.some((row) => isOverdue(row));
-              const allPaid = rows.length > 0 && rows.every((row) => isPaid(row));
-              const visibleDots = rows.slice(0, 3);
+              const visible = rows.slice(0, 4);
 
               return (
-                <button
+                <div
                   key={iso}
-                  type="button"
                   onClick={() => setSelectedDate(iso)}
                   className={cn(
-                    "group min-h-[50px] border-b border-r border-border/60 p-2 text-left transition-colors hover:bg-muted/30 sm:min-h-[80px]",
-                    !inMonth && "bg-black/10",
-                    selected && "border-accent bg-accent/10",
+                    "flex min-h-[92px] cursor-pointer flex-col gap-1 border-b border-r border-border/60 p-1.5 transition-colors last:border-r-0 hover:bg-muted/20 sm:min-h-[116px]",
+                    !inMonth && "bg-black/20 text-muted-foreground/60",
+                    selected && "ring-1 ring-inset ring-primary/40",
                   )}
                 >
-                  <div className="flex items-start justify-between">
+                  <div className="flex items-center justify-end">
                     <span
                       className={cn(
-                        "inline-flex h-6 w-6 items-center justify-center rounded-full text-sm",
-                        inMonth ? "text-foreground" : "text-muted-foreground/50",
-                        isToday && "bg-accent text-accent-foreground",
+                        "flex h-6 w-6 items-center justify-center rounded-full text-xs font-semibold",
+                        isToday ? "bg-primary text-primary-foreground" : inMonth ? "text-foreground" : "text-muted-foreground/50",
                       )}
                     >
                       {date.getDate()}
                     </span>
                   </div>
 
-                  <div className="mt-2 flex items-center gap-1">
-                    {overdue ? (
-                      <span className="h-2 w-2 animate-pulse rounded-full bg-destructive" />
-                    ) : allPaid ? (
-                      <span className="inline-flex h-2 w-2 items-center justify-center rounded-full bg-muted" />
-                    ) : (
-                      visibleDots.map((row) => {
-                        const rowType = normalizeType(row.type);
-                        return (
-                          <span
-                            key={row.id}
-                            className={cn(
-                              "h-2 w-2 rounded-full",
-                              rowType === "payable" ? "bg-destructive" : "bg-[hsl(var(--success))]",
-                            )}
-                          />
-                        );
-                      })
-                    )}
-
-                    {rows.length > 3 && <span className="text-[10px] text-muted-foreground">+{rows.length - 3}</span>}
-                    {allPaid && <Check className="h-3 w-3 text-muted-foreground" />}
+                  <div className="flex flex-col gap-1 overflow-hidden">
+                    {visible.map((row) => {
+                      const kind =
+                        row.source === "debt"
+                          ? "debt"
+                          : row.source === "card_closing" || row.source === "card_due"
+                            ? "invoice"
+                            : normalizeType(row.type) === "receivable"
+                              ? "receivable"
+                              : normalizeType(row.type) === "payable"
+                                ? "payable"
+                                : "task";
+                      const color = KIND_COLOR[kind];
+                      const paid = isPaid(row);
+                      const overdue = isOverdue(row);
+                      return (
+                        <button
+                          key={row.id}
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openEdit(row);
+                          }}
+                          title={row.description}
+                          className={cn(
+                            "flex items-center gap-1.5 rounded-md border px-1.5 py-0.5 text-left text-[11px] leading-tight transition-opacity hover:opacity-80",
+                            paid && "opacity-50",
+                          )}
+                          style={{ borderColor: `${color}55`, backgroundColor: `${color}1f`, color }}
+                        >
+                          <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: color }} />
+                          <span className={cn("truncate font-medium", paid && "line-through")}>{row.description}</span>
+                          {overdue && !paid && <span className="ml-auto h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-destructive" />}
+                        </button>
+                      );
+                    })}
+                    {rows.length > 4 && <span className="px-1 text-[10px] font-medium text-muted-foreground">+{rows.length - 4} mais</span>}
                   </div>
-                </button>
+                </div>
               );
             })}
           </div>
-        </section>
+        </div>
 
-        <section className="space-y-4">
+        <section className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_1.3fr]">
+          <div className="space-y-4">
           <div className="glass-card rounded-xl border border-border bg-card p-4">
             <p className="mb-3 text-sm font-semibold text-foreground">Resumo do Mês</p>
 
@@ -862,8 +904,9 @@ const SchedulePage = () => {
               </div>
             </div>
           )}
+          </div>
 
-          <div className="rounded-xl border p-4" style={{ backgroundColor: "#12121a", borderColor: "#1e1e2e" }}>
+          <div className="glass-card rounded-xl border border-border bg-card p-4">
             <p className="mb-3 text-sm font-semibold text-foreground">Compromissos — {selectedDateLabel}</p>
 
             {loading ? (
