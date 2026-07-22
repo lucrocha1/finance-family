@@ -54,7 +54,7 @@ const SetupFamilyPage = () => {
     });
 
     if (error) {
-      setCreateError(error.message || "Não foi possível criar a família");
+      setCreateError("Não foi possível criar a família. Tente novamente.");
       setCreateLoading(false);
       return;
     }
@@ -63,7 +63,9 @@ const SetupFamilyPage = () => {
     await seedDefaultCategories();
 
     markFamilyLinked();
-    void refreshProfile();
+    // Aguarda o perfil recarregar antes de navegar, senão o dashboard renderiza
+    // com family=null por um instante (telas vazias).
+    await refreshProfile();
     navigate("/dashboard", { replace: true });
   };
 
@@ -125,7 +127,7 @@ const SetupFamilyPage = () => {
     }
 
     markFamilyLinked();
-    void refreshProfile();
+    await refreshProfile();
     navigate("/dashboard", { replace: true });
   };
 

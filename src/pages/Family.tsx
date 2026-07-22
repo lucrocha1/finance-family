@@ -63,10 +63,14 @@ const FamilyPage = () => {
 
   const handleCopyCode = async () => {
     if (!family?.invite_code) return;
-    await navigator.clipboard.writeText(family.invite_code);
-    setCopied(true);
-    toast.success("Copiado!");
-    setTimeout(() => setCopied(false), 1800);
+    try {
+      await navigator.clipboard.writeText(family.invite_code);
+      setCopied(true);
+      toast.success("Copiado!");
+      setTimeout(() => setCopied(false), 1800);
+    } catch {
+      toast.error("Não foi possível copiar — copie o código manualmente.");
+    }
   };
 
   const handleSaveFamilyName = async () => {
@@ -200,7 +204,7 @@ const FamilyPage = () => {
               (isCurrentUser ? currentUser?.full_name?.trim() : "") ||
               member.profiles?.email ||
               "Usuário";
-            const email = member.profiles?.email || currentUser?.email || "Sem e-mail";
+            const email = member.profiles?.email || (isCurrentUser ? currentUser?.email : "") || "Sem e-mail";
             const initials = fullName
               .split(/\s+/)
               .slice(0, 2)

@@ -187,16 +187,17 @@ const SettingsPage = () => {
 
     setLoading(true);
 
+    // Dados são POR USUÁRIO: a RLS (user_id = auth.uid()) já isola. Filtrar por
+    // family_id era redundante e escondia contas/categorias cujo family_id tenha
+    // ficado defasado (ex.: após trocar de família).
     const [accountsRes, categoriesRes] = await Promise.all([
       supabase
         .from("accounts")
         .select("id, user_id, family_id, name, institution, initial_balance, balance, type, color")
-        .eq("family_id", family.id)
         .order("name", { ascending: true }),
       supabase
         .from("categories")
         .select("id, user_id, family_id, name, type, icon, color")
-        .eq("family_id", family.id)
         .order("name", { ascending: true }),
     ]);
 
@@ -204,7 +205,6 @@ const SettingsPage = () => {
       const fallback = await supabase
         .from("accounts")
         .select("id, user_id, family_id, name, institution, balance")
-        .eq("family_id", family.id)
         .order("name", { ascending: true });
       setAccounts(
         ((fallback.data as Record<string, unknown>[] | null) ?? []).map((row) => ({
@@ -324,11 +324,20 @@ const SettingsPage = () => {
     }
 
     setDeletingAccount(true);
-    await supabase.from("family_members").delete().eq("user_id", user.id);
-    await supabase.from("profiles").delete().eq("id", user.id);
+    // NOTE: isto NÃO apaga o usuário de login (auth) nem os dados financeiros
+    // (transactions/accounts/etc., isolados por user_id) — só desvincula da
+    // família e desconecta. Exclusão completa depende de uma Edge Function
+    // service_role (a construir). Ao menos não reportamos sucesso em falha.
+    const memberDel = await supabase.from("family_members").delete().eq("user_id", user.id);
+    const profileDel = await supabase.from("profiles").delete().eq("id", user.id);
+    if (memberDel.error || profileDel.error) {
+      setDeletingAccount(false);
+      toast.error("Não foi possível concluir. Tente novamente.");
+      return;
+    }
     await supabase.auth.signOut({ scope: "global" });
     setDeletingAccount(false);
-    toast.success("Conta removida dos dados do app");
+    setDeleteAccountConfirm("");
     setDeleteAccountOpen(false);
   };
 
@@ -855,6 +864,8 @@ const SettingsPage = () => {
                   <button
                     key={color}
                     type="button"
+                    aria-label={`Cor ${color}`}
+                    aria-pressed={accountColor === color}
                     className={cn("h-7 w-7 rounded-full border border-border", accountColor === color && "ring-2 ring-accent ring-offset-2 ring-offset-background")}
                     style={{ backgroundColor: color }}
                     onClick={() => setAccountColor(color)}
@@ -928,6 +939,8 @@ const SettingsPage = () => {
                   <button
                     key={color}
                     type="button"
+                    aria-label={`Cor ${color}`}
+                    aria-pressed={categoryColor === color}
                     className={cn("h-7 w-7 rounded-full border border-border", categoryColor === color && "ring-2 ring-accent ring-offset-2 ring-offset-background")}
                     style={{ backgroundColor: color }}
                     onClick={() => setCategoryColor(color)}
@@ -973,11 +986,11 @@ const SettingsPage = () => {
         </AlertDialogContent>
       </AlertDialog>
 
-      <AlertDialog open={deleteAccountOpen} onOpenChange={setDeleteAccountOpen}>
+      <AlertDialog open={deleteAccountOpen} onOpenChange={(o) => { setDeleteAccountOpen(o); if (!o) setDeleteAccountConfirm(""); }}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Excluir minha conta</AlertDialogTitle>
-            <AlertDialogDescription>Digite "EXCLUIR" para confirmar.</AlertDialogDescription>
+            <AlertDialogTitle>Sair e desvincular da família</AlertDialogTitle>
+            <AlertDialogDescription>Isto desvincula você da família e desconecta. Seus dados financeiros e o login não são apagados. Digite "EXCLUIR" para confirmar.</AlertDialogDescription>
           </AlertDialogHeader>
           <div className="space-y-1.5">
             <Label>Confirmação</Label>
