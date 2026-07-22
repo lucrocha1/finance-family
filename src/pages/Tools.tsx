@@ -6,10 +6,22 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ptCurrency } from "@/lib/formatting";
 
-// Parse de número no formato brasileiro: remove os pontos de milhar e troca a
-// vírgula decimal por ponto. Antes, Number(x.replace(",", ".")) interpretava
-// "10.000" (dez mil) como 10 (o ponto virava decimal) — F4.
-const parseBRNumber = (v: string) => Number(String(v).replace(/\./g, "").replace(",", ".")) || 0;
+// Parse de número no formato brasileiro, desambiguando o ponto:
+//  - com vírgula presente: ponto = milhar, vírgula = decimal ("10.000,50").
+//  - só com ponto seguido de 1-2 casas: decimal ("1.5" = taxa 1,5%).
+//  - demais (ponto com 3 casas ou vários pontos): milhar ("10.000" = dez mil).
+// Antes, todo ponto virava milhar, então "1.5" no campo de taxa virava 15%.
+const parseBRNumber = (v: string) => {
+  const s = String(v).trim();
+  if (!s) return 0;
+  const normalized = s.includes(",")
+    ? s.replace(/\./g, "").replace(",", ".")
+    : /^-?\d+\.\d{1,2}$/.test(s)
+      ? s
+      : s.replace(/\./g, "");
+  return Number(normalized.replace(/[^0-9.-]/g, "")) || 0;
+};
+const parseMonths = (v: string) => Math.min(Math.max(0, Math.floor(parseBRNumber(v))), 1200);
 
 const ToolsPage = () => {
   return (
@@ -38,7 +50,7 @@ const CompoundInterest = () => {
     const P = parseBRNumber(initial);
     const PMT = parseBRNumber(monthly);
     const i = parseBRNumber(rate) / 100;
-    const n = Number(months) || 0;
+    const n = parseMonths(months); // limitado a 1200 meses (100 anos) p/ não travar a UI
 
     let total = P;
     let invested = P;
@@ -106,7 +118,7 @@ const LoanSimulator = () => {
   const result = useMemo(() => {
     const P = parseBRNumber(principal);
     const i = parseBRNumber(rate) / 100;
-    const n = Number(months) || 1;
+    const n = parseMonths(months);
     if (P <= 0 || n <= 0) return { installment: 0, total: 0, interest: 0 };
     if (i === 0) return { installment: P / n, total: P, interest: 0 };
     const installment = (P * i * Math.pow(1 + i, n)) / (Math.pow(1 + i, n) - 1);

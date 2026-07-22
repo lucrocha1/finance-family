@@ -123,7 +123,6 @@ const GoalsPage = () => {
   const [categories, setCategories] = useState<CategoryRow[]>([]);
   const [budgets, setBudgets] = useState<BudgetRow[]>([]);
   const [monthExpenses, setMonthExpenses] = useState<Map<string, number>>(new Map());
-  const [monthExpenseTotal, setMonthExpenseTotal] = useState(0);
 
   const [goals, setGoals] = useState<GoalRow[]>([]);
   const [contributions, setContributions] = useState<GoalContributionRow[]>([]);
@@ -144,6 +143,8 @@ const GoalsPage = () => {
   const [goalSaving, setGoalSaving] = useState(false);
 
   const [deleteGoalId, setDeleteGoalId] = useState<string | null>(null);
+  const [contributionToDelete, setContributionToDelete] = useState<GoalContributionRow | null>(null);
+  const [budgetToRemove, setBudgetToRemove] = useState<BudgetRow | null>(null);
 
   const [contributionModalOpen, setContributionModalOpen] = useState(false);
   const [contributionGoal, setContributionGoal] = useState<GoalRow | null>(null);
@@ -167,7 +168,6 @@ const GoalsPage = () => {
       setGoals([]);
       setContributions([]);
       setMonthExpenses(new Map());
-      setMonthExpenseTotal(0);
       return;
     }
 
@@ -222,11 +222,9 @@ const GoalsPage = () => {
     }));
 
     const expenseMap = new Map<string, number>();
-    let totalExpenses = 0;
 
     ((txRes.data as Array<{ category_id: string | null; amount: number }> | null) ?? []).forEach((tx) => {
       const value = Number(tx.amount || 0);
-      totalExpenses += value;
       const key = tx.category_id || "uncategorized";
       expenseMap.set(key, (expenseMap.get(key) ?? 0) + value);
     });
@@ -236,9 +234,8 @@ const GoalsPage = () => {
     setGoals(nextGoals);
     setContributions(nextContrib);
     setMonthExpenses(expenseMap);
-    setMonthExpenseTotal(totalExpenses);
     setLoading(false);
-  }, [family?.id, from, month, to, year]);
+  }, [family?.id, from, to]);
 
   useEffect(() => {
     void loadData();
@@ -290,15 +287,20 @@ const GoalsPage = () => {
     // (não dos registros do DB inteiros). Total gasto = soma das despesas
     // SÓ nas categorias com budget definido, pra Disponível ser
     // comparável (mesmo escopo dos dois lados).
+    // Só categorias VISÍVEIS entram no resumo — um budget de categoria
+    // removida ou que virou "receita" não aparece como card, então somá-lo aqui
+    // deixaria o resumo divergente da lista.
+    const visibleIds = new Set(categories.map((c) => c.id));
     let totalBudget = 0;
     let totalSpent = 0;
     budgetByCategory.forEach((b, categoryId) => {
+      if (!visibleIds.has(categoryId)) return;
       if (Number(b.amount || 0) <= 0) return; // marcador de fim de vigência (F24)
       totalBudget += Number(b.amount || 0);
       totalSpent += monthExpenses.get(categoryId) ?? 0;
     });
     return { totalBudget, totalSpent, available: totalBudget - totalSpent };
-  }, [budgetByCategory, monthExpenses]);
+  }, [budgetByCategory, categories, monthExpenses]);
 
   const budgetChartData = useMemo(() => {
     return budgetCards
@@ -313,9 +315,12 @@ const GoalsPage = () => {
   }, [budgetCards]);
 
   const goalsSummary = useMemo(() => {
-    const active = goals.filter((goal) => goal.status !== "completed");
-    const totalCurrent = active.reduce((sum, goal) => sum + goal.current_amount, 0);
-    const totalRemaining = active.reduce((sum, goal) => sum + Math.max(goal.target_amount - goal.current_amount, 0), 0);
+    // "Total guardado" soma TODAS as metas (não cai quando uma é concluída);
+    // "Falta juntar" considera só as não concluídas.
+    const totalCurrent = goals.reduce((sum, goal) => sum + goal.current_amount, 0);
+    const totalRemaining = goals
+      .filter((goal) => goal.status !== "completed")
+      .reduce((sum, goal) => sum + Math.max(goal.target_amount - goal.current_amount, 0), 0);
     return { totalCurrent, totalRemaining };
   }, [goals]);
 
@@ -377,7 +382,7 @@ const GoalsPage = () => {
       return;
     }
 
-    toast.success(existing ? "Limite atualizado" : "Limite criado");
+    toast.success(existingIsThisMonth ? "Limite atualizado" : "Limite criado");
     cancelBudgetEditor();
     void loadData();
   };
@@ -490,7 +495,13 @@ const GoalsPage = () => {
           date: toIsoDate(new Date()),
           notes: "Saldo inicial",
         });
-        error = res.error;
+        if (res.error) {
+          // Compensação: sem transação entre os dois inserts, se o aporte inicial
+          // falhar desfazemos a meta recém-criada — senão sobraria uma meta com
+          // saldo R$0 divergente do "valor atual" que o usuário informou.
+          await supabase.from("goals").delete().eq("id", created.id);
+          error = res.error;
+        }
       }
     }
 
@@ -627,11 +638,11 @@ const GoalsPage = () => {
       {tab === "budget" ? (
         <div className="space-y-6">
           <div className="mx-auto flex w-full max-w-sm items-center justify-between rounded-xl border border-border bg-card px-2 py-2">
-            <Button variant="ghost" size="icon" className="h-9 w-9" onClick={() => setSelectedMonth((prev) => new Date(prev.getFullYear(), prev.getMonth() - 1, 1))}>
+            <Button variant="ghost" size="icon" aria-label="Mês anterior" className="h-9 w-9" onClick={() => setSelectedMonth((prev) => new Date(prev.getFullYear(), prev.getMonth() - 1, 1))}>
               <ChevronLeft className="h-4 w-4" />
             </Button>
             <p className="min-w-[190px] text-center text-base font-bold text-foreground">{monthLabel}</p>
-            <Button variant="ghost" size="icon" className="h-9 w-9" onClick={() => setSelectedMonth((prev) => new Date(prev.getFullYear(), prev.getMonth() + 1, 1))}>
+            <Button variant="ghost" size="icon" aria-label="Próximo mês" className="h-9 w-9" onClick={() => setSelectedMonth((prev) => new Date(prev.getFullYear(), prev.getMonth() + 1, 1))}>
               <ChevronRight className="h-4 w-4" />
             </Button>
           </div>
@@ -686,7 +697,7 @@ const GoalsPage = () => {
                               <Button variant="outline" size="sm" onClick={() => openBudgetEditor(row.category.id, row.limit)}>
                                 <Pencil className="mr-1 h-3.5 w-3.5" /> Editar
                               </Button>
-                              <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-destructive" onClick={() => removeBudget(row.budget!)}>
+                              <Button variant="ghost" size="icon" aria-label="Remover limite do orçamento" className="text-muted-foreground hover:text-destructive" onClick={() => setBudgetToRemove(row.budget!)}>
                                 <Trash2 className="h-4 w-4" />
                               </Button>
                             </>
@@ -730,7 +741,7 @@ const GoalsPage = () => {
                             className="max-w-[220px]"
                             placeholder="R$ 0,00"
                           />
-                          <Button size="icon" disabled={savingBudget} onClick={() => void saveBudget(row.category.id)}>
+                          <Button size="icon" aria-label="Salvar limite" disabled={savingBudget} onClick={() => void saveBudget(row.category.id)}>
                             <Check className="h-4 w-4" />
                           </Button>
                           <Button size="icon" variant="ghost" onClick={cancelBudgetEditor}>
@@ -858,8 +869,8 @@ const GoalsPage = () => {
                       <div className="space-y-2">
                         <div className="h-4 w-full rounded-full bg-secondary">
                           <div
-                            className={cn("h-4 rounded-full", progress >= 100 ? "bg-success" : "bg-accent")}
-                            style={{ width: `${progress}%`, backgroundColor: progress >= 100 ? "hsl(var(--success))" : goal.color || "hsl(var(--accent))" }}
+                            className="h-4 rounded-full transition-all"
+                            style={{ width: `${Math.min(progress, 100)}%`, backgroundColor: progress >= 100 ? "hsl(var(--success))" : goal.color || "hsl(var(--accent))" }}
                           />
                         </div>
                         <div className="flex items-center justify-between text-sm">
@@ -892,7 +903,7 @@ const GoalsPage = () => {
                                 <span className="text-muted-foreground">{new Date(`${item.date}T00:00:00`).toLocaleDateString("pt-BR")}</span>
                                 <span className="font-medium text-foreground">{ptCurrency.format(item.amount)}</span>
                                 <span className="truncate text-muted-foreground">{item.notes || "—"}</span>
-                                <Button size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground hover:text-destructive" onClick={() => void deleteContribution(item)}>
+                                <Button size="icon" variant="ghost" aria-label="Excluir aporte" className="h-7 w-7 text-muted-foreground hover:text-destructive" onClick={() => setContributionToDelete(item)}>
                                   <X className="h-3.5 w-3.5" />
                                 </Button>
                               </div>
@@ -945,6 +956,8 @@ const GoalsPage = () => {
                     <button
                       key={color}
                       type="button"
+                      aria-label={`Cor ${color}`}
+                      aria-pressed={goalColor === color}
                       className={cn("h-7 w-7 rounded-full border border-border", goalColor === color && "ring-2 ring-accent ring-offset-2 ring-offset-background")}
                       style={{ backgroundColor: color }}
                       onClick={() => setGoalColor(color)}
@@ -1070,6 +1083,50 @@ const GoalsPage = () => {
           <AlertDialogFooter>
             <AlertDialogCancel>Cancelar</AlertDialogCancel>
             <AlertDialogAction onClick={() => void confirmDeleteGoal()}>Excluir</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={Boolean(contributionToDelete)} onOpenChange={(open) => !open && setContributionToDelete(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Excluir aporte?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {contributionToDelete ? `Remove o aporte de ${ptCurrency.format(contributionToDelete.amount)}. O progresso da meta será recalculado.` : ""}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                const target = contributionToDelete;
+                setContributionToDelete(null);
+                if (target) void deleteContribution(target);
+              }}
+            >
+              Excluir
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={Boolean(budgetToRemove)} onOpenChange={(open) => !open && setBudgetToRemove(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remover limite?</AlertDialogTitle>
+            <AlertDialogDescription>O limite de orçamento desta categoria deixa de valer a partir deste mês.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                const target = budgetToRemove;
+                setBudgetToRemove(null);
+                if (target) void removeBudget(target);
+              }}
+            >
+              Remover
+            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
