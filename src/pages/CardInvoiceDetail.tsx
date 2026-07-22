@@ -286,6 +286,12 @@ const CardInvoiceDetailPage = () => {
   }, [loadData]);
 
   const invoiceTotal = useMemo(() => transactions.reduce((sum, tx) => sum + Number(tx.amount || 0), 0), [transactions]);
+  // Valor EM ABERTO da fatura (exclui compras já pagas). Base pro pagamento e
+  // pro botão "Pagar Fatura" (F2/F8/F9).
+  const pendingTotal = useMemo(
+    () => transactions.filter((tx) => tx.status !== "paid").reduce((sum, tx) => sum + Number(tx.amount || 0), 0),
+    [transactions],
+  );
   const dueDate = useMemo(
     () => getDueDate(selectedInvoiceMonth, Number(card?.due_day || 1), Number(card?.closing_day || 1)),
     [card?.due_day, card?.closing_day, selectedInvoiceMonth],
@@ -368,10 +374,13 @@ const CardInvoiceDetailPage = () => {
   };
 
   const openPayInvoice = () => {
-    if (!card || transactions.length === 0) return;
+    if (!card || pendingTotal <= 0) return;
     setPayAccountId(accounts[0]?.id ?? "");
     setPayDate(toISODate(dueDate));
-    setPayAmountDigits(String(Math.round(invoiceTotal * 100)));
+    // Valor = total EM ABERTO. Pagamento parcial não é suportado (pagar libera o
+    // limite de todo o ciclo), então usamos o pendente e não o invoiceTotal
+    // (que incluiria compras já pagas) — F2/F9.
+    setPayAmountDigits(String(Math.round(pendingTotal * 100)));
     setPayOpen(true);
   };
 
@@ -380,9 +389,16 @@ const CardInvoiceDetailPage = () => {
       toast.error("Selecione uma conta para pagar a fatura");
       return;
     }
-    const amountValue = Number(payAmountDigits || "0") / 100;
-    if (amountValue <= 0) {
-      toast.error("Valor inválido");
+    // Paga o total EM ABERTO da fatura. Pagamento parcial não é suportado (pagar
+    // libera o limite de todo o ciclo), então usamos a soma das transações
+    // PENDENTES e marcamos SOMENTE elas como pagas — antes marcava-se todas
+    // (inclusive já pagas) com um valor editável, permitindo pagamento parcial
+    // que sumia com o saldo restante e pagamento duplicado (F2/F9).
+    const pendingTxs = transactions.filter((tx) => tx.status !== "paid");
+    const pendingIds = pendingTxs.map((tx) => tx.id);
+    const amountValue = pendingTxs.reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+    if (amountValue <= 0 || pendingIds.length === 0) {
+      toast.error("Esta fatura não tem valor em aberto");
       return;
     }
 
@@ -415,19 +431,14 @@ const CardInvoiceDetailPage = () => {
       return;
     }
 
-    // 2. Mark all transactions in this invoice cycle as paid (releases card limit)
-    const cycle = getCycleWindow(Number(card.closing_day || 1), selectedInvoiceMonth);
-    const ids = transactions.map((tx) => tx.id);
-    if (ids.length > 0) {
-      const { error: updErr } = await supabase
-        .from("transactions")
-        .update({ status: "paid" })
-        .in("id", ids)
-        .gte("date", cycle.start)
-        .lte("date", cycle.end);
-      if (updErr) {
-        toast.error("Pagamento criado, mas falhou ao marcar parcelas como pagas");
-      }
+    // 2. Marca SOMENTE as transações pendentes desta fatura como pagas (libera o
+    //    limite do cartão). As já pagas não são re-tocadas.
+    const { error: updErr } = await supabase
+      .from("transactions")
+      .update({ status: "paid" })
+      .in("id", pendingIds);
+    if (updErr) {
+      toast.error("Pagamento criado, mas falhou ao marcar as compras como pagas");
     }
 
     setPaying(false);
@@ -478,7 +489,7 @@ const CardInvoiceDetailPage = () => {
         <Button variant="outline" size="icon" className="h-9 w-9 rounded-lg" onClick={() => setSelectedInvoiceMonth((prev) => startOfMonth(new Date(prev.getFullYear(), prev.getMonth() + 1, 1)))}>
           <ChevronRight className="h-4 w-4" />
         </Button>
-        {transactions.length > 0 && invoiceStatus.label !== "Paga" && (
+        {pendingTotal > 0 && (
           <Button onClick={openPayInvoice} className="ml-3 h-9 rounded-lg">
             Pagar Fatura
           </Button>
@@ -723,11 +734,11 @@ const CardInvoiceDetailPage = () => {
               <Label>Valor</Label>
               <Input
                 inputMode="numeric"
+                readOnly
                 value={ptCurrency.format(Number(payAmountDigits || "0") / 100)}
-                onChange={(event) => setPayAmountDigits(event.target.value.replace(/\D/g, ""))}
-                className="h-[42px] rounded-lg border-border bg-secondary text-foreground"
+                className="h-[42px] rounded-lg border-border bg-secondary text-muted-foreground"
               />
-              <p className="text-xs text-muted-foreground">Total da fatura: {ptCurrency.format(invoiceTotal)}</p>
+              <p className="text-xs text-muted-foreground">Valor em aberto da fatura. Pagar quita a fatura inteira e libera o limite — pagamento parcial não é suportado.</p>
             </div>
 
             <div className="space-y-2">
