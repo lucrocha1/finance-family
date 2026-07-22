@@ -7,6 +7,7 @@ type Family = {
   id: string;
   name: string;
   invite_code: string;
+  owner_id: string;
 };
 
 type CurrentUserProfile = {
@@ -38,6 +39,7 @@ type FamilyContextValue = {
   members: FamilyMember[];
   currentUser: CurrentUserProfile | null;
   isAdmin: boolean;
+  isOwner: boolean;
   loading: boolean;
   error: string | null;
   refetch: () => Promise<void>;
@@ -96,7 +98,7 @@ export const FamilyProvider = ({ children }: FamilyProviderProps) => {
     }
 
     const [{ data: familyData, error: familyError }, { data: membersData, error: membersError }] = await Promise.all([
-      supabase.from("families").select("id, name, invite_code").eq("id", profileData.family_id).maybeSingle(),
+      supabase.from("families").select("id, name, invite_code, owner_id").eq("id", profileData.family_id).maybeSingle(),
       supabase
         .from("family_members")
         .select("id, user_id, family_id, role, created_at, profiles ( id, email, full_name, avatar_url )")
@@ -142,17 +144,20 @@ export const FamilyProvider = ({ children }: FamilyProviderProps) => {
     return members.some((member) => member.user_id === user.id && member.role === "admin");
   }, [members, user]);
 
+  const isOwner = useMemo(() => Boolean(user && family && family.owner_id === user.id), [family, user]);
+
   const value = useMemo(
     () => ({
       family,
       members,
       currentUser,
       isAdmin,
+      isOwner,
       loading,
       error,
       refetch: loadFamilyData,
     }),
-    [currentUser, error, family, isAdmin, loadFamilyData, loading, members],
+    [currentUser, error, family, isAdmin, isOwner, loadFamilyData, loading, members],
   );
 
   return <FamilyContext.Provider value={value}>{children}</FamilyContext.Provider>;

@@ -11,7 +11,7 @@ import {
   UserCircle2,
   Wallet,
 } from "lucide-react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 
 import {
   AlertDialog,
@@ -30,7 +30,6 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "@/components/ui/sonner";
 import { useAuth } from "@/contexts/AuthContext";
@@ -121,6 +120,7 @@ const SettingsPage = () => {
   const { user, profile, refreshProfile } = useAuth();
   const { status: pushStatus, enable: enablePush, disable: disablePush } = useEnablePush(user?.id);
   const { family } = useFamily();
+  const navigate = useNavigate();
 
   const [tab, setTab] = useState<SettingsTab>("profile");
   const [loading, setLoading] = useState(true);
@@ -162,17 +162,6 @@ const SettingsPage = () => {
   const [deleteCategoryId, setDeleteCategoryId] = useState<string | null>(null);
 
   const [creatingDefaults, setCreatingDefaults] = useState(false);
-
-  const [dateFormat, setDateFormat] = useState<"ddmmyyyy" | "mmddyyyy" | "yyyymmdd">("ddmmyyyy");
-  const [notifyDay, setNotifyDay] = useState(true);
-  const [notifyBudget, setNotifyBudget] = useState(false);
-
-  const datePreview = useMemo(() => {
-    const base = new Date(2026, 3, 28);
-    if (dateFormat === "mmddyyyy") return base.toLocaleDateString("en-US");
-    if (dateFormat === "yyyymmdd") return "2026-04-28";
-    return base.toLocaleDateString("pt-BR");
-  }, [dateFormat]);
 
   const filteredCategories = useMemo(
     () => categories.filter((cat) => cat.type === categoryTypeTab).sort((a, b) => a.name.localeCompare(b.name, "pt-BR")),
@@ -324,21 +313,23 @@ const SettingsPage = () => {
     }
 
     setDeletingAccount(true);
-    // NOTE: isto NÃO apaga o usuário de login (auth) nem os dados financeiros
-    // (transactions/accounts/etc., isolados por user_id) — só desvincula da
-    // família e desconecta. Exclusão completa depende de uma Edge Function
-    // service_role (a construir). Ao menos não reportamos sucesso em falha.
-    const memberDel = await supabase.from("family_members").delete().eq("user_id", user.id);
-    const profileDel = await supabase.from("profiles").delete().eq("id", user.id);
-    if (memberDel.error || profileDel.error) {
+    // Exclusão COMPLETA via Edge Function (service_role): apaga todos os dados
+    // financeiros em cascata, trata a posse da família e remove o usuário do
+    // Auth. Nunca confia num id vindo do client — a function resolve pelo JWT.
+    const { data, error } = await supabase.functions.invoke("delete-account");
+    const ok = !error && (data as { ok?: boolean } | null)?.ok === true;
+    if (!ok) {
       setDeletingAccount(false);
-      toast.error("Não foi possível concluir. Tente novamente.");
+      toast.error("Não foi possível excluir a conta. Tente novamente.");
       return;
     }
-    await supabase.auth.signOut({ scope: "global" });
+    // A conta de login já foi apagada; limpa a sessão local e sai.
+    await supabase.auth.signOut({ scope: "local" });
     setDeletingAccount(false);
     setDeleteAccountConfirm("");
     setDeleteAccountOpen(false);
+    toast.success("Conta excluída");
+    navigate("/login", { replace: true });
   };
 
   const openCreateAccount = () => {
@@ -720,34 +711,6 @@ const SettingsPage = () => {
                 <CardTitle className="text-lg">Preferências</CardTitle>
               </CardHeader>
               <CardContent className="space-y-6">
-                <div className="space-y-1.5">
-                  <Label>Moeda</Label>
-                  <Select value="brl" onValueChange={() => undefined}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="brl">BRL — Real Brasileiro (R$)</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <p className="text-xs text-muted-foreground">Mais moedas em breve</p>
-                </div>
-
-                <div className="space-y-1.5">
-                  <Label>Formato de data</Label>
-                  <Select value={dateFormat} onValueChange={(value) => setDateFormat(value as "ddmmyyyy" | "mmddyyyy" | "yyyymmdd")}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="ddmmyyyy">DD/MM/AAAA</SelectItem>
-                      <SelectItem value="mmddyyyy">MM/DD/AAAA</SelectItem>
-                      <SelectItem value="yyyymmdd">AAAA-MM-DD</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <p className="text-xs text-muted-foreground">Hoje: {datePreview}</p>
-                </div>
-
                 <div className="space-y-2">
                   <Label>Tema</Label>
                   <div className="flex gap-2 rounded-lg border border-border bg-secondary/20 p-1">
@@ -782,14 +745,6 @@ const SettingsPage = () => {
                         <Button size="sm" onClick={() => void enablePush()}>Ativar</Button>
                       ) : null}
                     </div>
-                  </div>
-                  <div className="flex items-center justify-between rounded-lg border border-border bg-secondary/20 px-3 py-2">
-                    <p className="text-sm text-foreground">Notificar compromissos do dia</p>
-                    <Switch checked={notifyDay} onCheckedChange={setNotifyDay} />
-                  </div>
-                  <div className="flex items-center justify-between rounded-lg border border-border bg-secondary/20 px-3 py-2">
-                    <p className="text-sm text-foreground">Notificar quando estourar orçamento</p>
-                    <Switch checked={notifyBudget} onCheckedChange={setNotifyBudget} />
                   </div>
                 </div>
               </CardContent>
@@ -989,8 +944,8 @@ const SettingsPage = () => {
       <AlertDialog open={deleteAccountOpen} onOpenChange={(o) => { setDeleteAccountOpen(o); if (!o) setDeleteAccountConfirm(""); }}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Sair e desvincular da família</AlertDialogTitle>
-            <AlertDialogDescription>Isto desvincula você da família e desconecta. Seus dados financeiros e o login não são apagados. Digite "EXCLUIR" para confirmar.</AlertDialogDescription>
+            <AlertDialogTitle>Excluir minha conta</AlertDialogTitle>
+            <AlertDialogDescription>Isto apaga <strong>permanentemente</strong> sua conta de login e <strong>todos</strong> os seus dados financeiros (transações, contas, cartões, dívidas, investimentos, metas…). Esta ação é irreversível. Digite "EXCLUIR" para confirmar.</AlertDialogDescription>
           </AlertDialogHeader>
           <div className="space-y-1.5">
             <Label>Confirmação</Label>

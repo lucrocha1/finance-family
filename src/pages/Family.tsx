@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
-import { Copy, Loader2, PencilLine, Trash2, Users } from "lucide-react";
+import { Copy, Loader2, LogOut, PencilLine, Trash2, Users } from "lucide-react";
 import { z } from "zod";
+import { useNavigate } from "react-router-dom";
 
 import {
   AlertDialog,
@@ -18,6 +19,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
+import { useAuth } from "@/contexts/AuthContext";
 import { useFamily } from "@/contexts/FamilyContext";
 import { supabase } from "@/integrations/supabase/client";
 
@@ -37,13 +39,17 @@ const formatDate = (isoDate?: string) => {
 };
 
 const FamilyPage = () => {
-  const { family, members, currentUser, isAdmin, loading, error, refetch } = useFamily();
+  const { family, members, currentUser, isAdmin, isOwner, loading, error, refetch } = useFamily();
+  const { refreshProfile } = useAuth();
+  const navigate = useNavigate();
 
   const [copied, setCopied] = useState(false);
   const [editingFamilyName, setEditingFamilyName] = useState(false);
   const [familyNameInput, setFamilyNameInput] = useState(family?.name ?? "");
   const [savingFamilyName, setSavingFamilyName] = useState(false);
   const [removingMemberId, setRemovingMemberId] = useState<string | null>(null);
+  const [updatingRoleId, setUpdatingRoleId] = useState<string | null>(null);
+  const [leavingFamily, setLeavingFamily] = useState(false);
 
   const sortedMembers = useMemo(() => {
     return [...members].sort((a, b) => {
@@ -100,12 +106,15 @@ const FamilyPage = () => {
     toast.success("Nome da família atualizado");
   };
 
-  const handleRemoveMember = async (memberId: string) => {
-    setRemovingMemberId(memberId);
-    const { error } = await supabase.from("family_members").delete().eq("id", memberId);
+  // Remoção via RPC SECURITY DEFINER: além de apagar a linha de family_members,
+  // limpa o profiles.family_id do removido (a RLS impede o admin de editar o
+  // perfil alheio direto). A RPC também barra remover o dono.
+  const handleRemoveMember = async (member: { id: string; user_id: string }) => {
+    setRemovingMemberId(member.id);
+    const { error } = await supabase.rpc("remove_family_member", { target_user_id: member.user_id });
 
     if (error) {
-      toast.error("Não foi possível remover o membro");
+      toast.error(error.message || "Não foi possível remover o membro");
       setRemovingMemberId(null);
       return;
     }
@@ -113,6 +122,35 @@ const FamilyPage = () => {
     await refetch();
     setRemovingMemberId(null);
     toast.success("Membro removido da família");
+  };
+
+  const handleSetRole = async (member: { id: string; user_id: string }, newRole: "admin" | "member") => {
+    setUpdatingRoleId(member.id);
+    const { error } = await supabase.rpc("set_member_role", { target_user_id: member.user_id, new_role: newRole });
+    if (error) {
+      toast.error(error.message || "Não foi possível alterar o papel");
+    } else {
+      await refetch();
+      toast.success(newRole === "admin" ? "Membro promovido a admin" : "Voltou a ser membro");
+    }
+    setUpdatingRoleId(null);
+  };
+
+  // Sair da própria família. Se for o dono e houver outros membros, a RPC
+  // transfere a posse automaticamente. Depois, o usuário fica sem família e é
+  // levado ao setup.
+  const handleLeaveFamily = async () => {
+    setLeavingFamily(true);
+    const { error } = await supabase.rpc("leave_family");
+    if (error) {
+      toast.error(error.message || "Não foi possível sair da família");
+      setLeavingFamily(false);
+      return;
+    }
+    await refreshProfile();
+    await refetch();
+    toast.success("Você saiu da família");
+    navigate("/setup-family", { replace: true });
   };
 
   if (loading) {
@@ -173,7 +211,7 @@ const FamilyPage = () => {
           ) : (
             <div className="flex flex-wrap items-center gap-3">
               <h2 className="text-3xl font-bold text-foreground">{family.name}</h2>
-              {isAdmin && (
+              {isOwner && (
                 <Button variant="outline" onClick={() => setEditingFamilyName(true)} className="h-9 rounded-lg border-border bg-secondary">
                   <PencilLine className="h-4 w-4" />
                   Editar nome da família
@@ -199,6 +237,7 @@ const FamilyPage = () => {
         <CardContent className="space-y-3">
           {sortedMembers.map((member) => {
             const isCurrentUser = member.user_id === currentUser?.id;
+            const isMemberOwner = family.owner_id === member.user_id;
             const fullName =
               member.profiles?.full_name?.trim() ||
               (isCurrentUser ? currentUser?.full_name?.trim() : "") ||
@@ -225,30 +264,42 @@ const FamilyPage = () => {
                   <Badge
                     className={member.role === "admin" ? "border-transparent bg-primary/20 text-primary" : "border-border bg-secondary text-secondary-foreground"}
                   >
-                    {member.role === "admin" ? "Admin" : "Membro"}
+                    {isMemberOwner ? "Dono" : member.role === "admin" ? "Admin" : "Membro"}
                   </Badge>
 
-                  {isAdmin && !isCurrentUser && (
-                    <AlertDialog>
-                      <AlertDialogTrigger asChild>
-                        <Button variant="destructive" className="h-9 rounded-lg" disabled={removingMemberId === member.id}>
-                          {removingMemberId === member.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
-                          Remover
-                        </Button>
-                      </AlertDialogTrigger>
-                      <AlertDialogContent className="rounded-xl border-border bg-card">
-                        <AlertDialogHeader>
-                          <AlertDialogTitle>Remover membro?</AlertDialogTitle>
-                          <AlertDialogDescription>Essa ação remove o membro da família atual.</AlertDialogDescription>
-                        </AlertDialogHeader>
-                        <AlertDialogFooter>
-                          <AlertDialogCancel className="border-border bg-secondary">Cancelar</AlertDialogCancel>
-                          <AlertDialogAction onClick={() => handleRemoveMember(member.id)} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                  {/* Ações de admin sobre OUTROS membros (nunca sobre o dono nem sobre si). */}
+                  {isAdmin && !isCurrentUser && !isMemberOwner && (
+                    <>
+                      <Button
+                        variant="outline"
+                        className="h-9 rounded-lg border-border bg-secondary"
+                        disabled={updatingRoleId === member.id}
+                        onClick={() => handleSetRole(member, member.role === "admin" ? "member" : "admin")}
+                      >
+                        {updatingRoleId === member.id ? <Loader2 className="h-4 w-4 animate-spin" /> : member.role === "admin" ? "Tornar membro" : "Tornar admin"}
+                      </Button>
+
+                      <AlertDialog>
+                        <AlertDialogTrigger asChild>
+                          <Button variant="destructive" className="h-9 rounded-lg" disabled={removingMemberId === member.id}>
+                            {removingMemberId === member.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
                             Remover
-                          </AlertDialogAction>
-                        </AlertDialogFooter>
-                      </AlertDialogContent>
-                    </AlertDialog>
+                          </Button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent className="rounded-xl border-border bg-card">
+                          <AlertDialogHeader>
+                            <AlertDialogTitle>Remover membro?</AlertDialogTitle>
+                            <AlertDialogDescription>Essa ação remove {fullName} da família. Os dados financeiros da pessoa continuam com ela (são por usuário).</AlertDialogDescription>
+                          </AlertDialogHeader>
+                          <AlertDialogFooter>
+                            <AlertDialogCancel className="border-border bg-secondary">Cancelar</AlertDialogCancel>
+                            <AlertDialogAction onClick={() => handleRemoveMember(member)} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                              Remover
+                            </AlertDialogAction>
+                          </AlertDialogFooter>
+                        </AlertDialogContent>
+                      </AlertDialog>
+                    </>
                   )}
                 </div>
               </div>
@@ -261,8 +312,32 @@ const FamilyPage = () => {
         <CardHeader>
           <CardTitle className="text-xl font-bold text-foreground">Dados da conta</CardTitle>
         </CardHeader>
-        <CardContent>
+        <CardContent className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-sm text-muted-foreground">Você entrou em {formatDate(membershipDate ?? currentUser?.created_at)}</p>
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button variant="outline" className="h-10 rounded-lg border-destructive/40 text-destructive hover:bg-destructive/10" disabled={leavingFamily}>
+                {leavingFamily ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogOut className="h-4 w-4" />}
+                Sair da família
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent className="rounded-xl border-border bg-card">
+              <AlertDialogHeader>
+                <AlertDialogTitle>Sair da família?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  Você deixa de fazer parte de "{family.name}". Seus dados financeiros continuam com você (são por usuário).
+                  {isOwner && members.length > 1 ? " Como você é o dono, a posse é transferida para outro membro." : ""}
+                  {isOwner && members.length <= 1 ? " Você é o único membro; a família ficará vazia." : ""}
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel className="border-border bg-secondary">Cancelar</AlertDialogCancel>
+                <AlertDialogAction onClick={handleLeaveFamily} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                  Sair
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         </CardContent>
       </Card>
     </div>
