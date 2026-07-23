@@ -31,6 +31,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useFamily } from "@/contexts/FamilyContext";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
+import { getInvoiceCycleForMonth } from "@/lib/cardCycle";
 
 type PaymentType = "payable" | "receivable";
 type RecurrenceType = "once" | "weekly" | "monthly" | "yearly";
@@ -77,38 +78,25 @@ const buildCardEvents = (
   monthEnd: Date,
 ): ScheduledRow[] => {
   const events: ScheduledRow[] = [];
-  const clampDay = (y: number, m: number, d: number) => {
-    const last = new Date(y, m + 1, 0).getDate();
-    return new Date(y, m, Math.min(d, last));
-  };
 
   cards.forEach((card) => {
     const closingDay = Number(card.closing_day || 0);
     const dueDay = Number(card.due_day || 0);
     if (!closingDay || !dueDay) return;
 
-    // Generate closing + due events for THIS month and NEXT month, then filter into the requested range
-    const candidates: Date[] = [
-      new Date(monthStart.getFullYear(), monthStart.getMonth(), 1),
-      new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 1),
-      new Date(monthStart.getFullYear(), monthStart.getMonth() - 1, 1),
-    ];
+    // Itera o MÊS DE VENCIMENTO ao redor do mês visualizado e usa o helper
+    // canônico getInvoiceCycleForMonth (fonte única do ciclo, igual
+    // Dashboard/CardInvoiceDetail/hook da Semana). Gera evento de fechamento e de
+    // vencimento; o filtro por [monthStart, monthEnd] decide o que aparece.
+    const dueMonthRefs = [-1, 0, 1, 2].map((off) => new Date(monthStart.getFullYear(), monthStart.getMonth() + off, 1));
 
-    candidates.forEach((monthRef) => {
-      const closingDate = clampDay(monthRef.getFullYear(), monthRef.getMonth(), closingDay);
-      const dueOffset = dueDay >= closingDay ? 0 : 1;
-      const dueDate = clampDay(monthRef.getFullYear(), monthRef.getMonth() + dueOffset, dueDay);
-
-      // Cycle of THIS closing: previous closing day + 1 → closingDate
-      const prevClosing = clampDay(monthRef.getFullYear(), monthRef.getMonth() - 1, closingDay);
-      // Convenção alinhada com lib/cardCycle: ciclo = [prevClosing (inclusive),
-      // closingDate - 1]; compra no dia do fechamento entra na PRÓXIMA fatura.
-      // Antes era [prevClosing+1, closingDate], deslocado 1 dia e divergindo do
-      // CardInvoiceDetail/Dashboard pro mesmo cartão (F54).
-      const cycleStartIso = toISODate(prevClosing);
-      const cycleEndDate = new Date(closingDate);
-      cycleEndDate.setDate(cycleEndDate.getDate() - 1);
-      const cycleEndIso = toISODate(cycleEndDate);
+    dueMonthRefs.forEach((monthRef) => {
+      const cycle = getInvoiceCycleForMonth(closingDay, dueDay, monthRef.getFullYear(), monthRef.getMonth());
+      // closingDate = cycleEnd + 1 (o helper devolve cycleEnd = fechamento − 1 dia).
+      const closingDate = new Date(cycle.cycleEnd);
+      closingDate.setDate(closingDate.getDate() + 1);
+      const cycleStartIso = toISODate(cycle.cycleStart);
+      const cycleEndIso = toISODate(cycle.cycleEnd);
       const total = cardTransactions
         .filter((tx) => tx.card_id === card.id && tx.date >= cycleStartIso && tx.date <= cycleEndIso)
         .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
@@ -117,7 +105,7 @@ const buildCardEvents = (
       if (total <= 0) return;
 
       const closingIso = toISODate(closingDate);
-      const dueIso = toISODate(dueDate);
+      const dueIso = toISODate(cycle.dueDate);
 
       if (closingIso >= toISODate(monthStart) && closingIso <= toISODate(monthEnd)) {
         events.push({

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { supabase } from "@/integrations/supabase/client";
+import { getInvoiceCycleForMonth } from "@/lib/cardCycle";
 
 const WINDOW_DAYS = 7;
 
@@ -15,11 +16,6 @@ export type DueItem = {
 };
 
 const toIso = (d: Date) => d.toISOString().slice(0, 10);
-
-const clampDay = (y: number, m: number, d: number) => {
-  const last = new Date(y, m + 1, 0).getDate();
-  return new Date(y, m, Math.min(d, last));
-};
 
 export const useUpcomingDueDates = (familyId: string | null | undefined) => {
   const [items, setItems] = useState<DueItem[]>([]);
@@ -81,7 +77,7 @@ export const useUpcomingDueDates = (familyId: string | null | undefined) => {
 
       if (cancelled) return;
 
-      const txItems: DueItem[] = (txRes.data ?? []).map((t: any) => ({
+      const txItems: DueItem[] = ((txRes.data ?? []) as Array<{ id: string; description: string | null; amount: number | null; date: string; type: string }>).map((t) => ({
         id: `tx-${t.id}`,
         source: "transaction",
         description: t.description ?? "Transação",
@@ -91,9 +87,9 @@ export const useUpcomingDueDates = (familyId: string | null | undefined) => {
         routeTarget: "/transactions",
       }));
 
-      const schedItems: DueItem[] = (schedRes.data ?? [])
-        .filter((s: any) => !s.is_paid)
-        .map((s: any) => ({
+      const schedItems: DueItem[] = ((schedRes.data ?? []) as Array<{ id: string; description: string | null; amount: number | null; due_date: string; type: string; is_paid: boolean | null }>)
+        .filter((s) => !s.is_paid)
+        .map((s) => ({
           id: `sched-${s.id}`,
           source: "scheduled",
           description: s.description ?? "Compromisso",
@@ -103,7 +99,7 @@ export const useUpcomingDueDates = (familyId: string | null | undefined) => {
           routeTarget: "/schedule",
         }));
 
-      const debtItems: DueItem[] = (debtsRes.data ?? []).map((d: any) => ({
+      const debtItems: DueItem[] = ((debtsRes.data ?? []) as Array<{ id: string; name: string | null; total_with_interest: number | null; original_amount: number | null; amount_paid: number | null; due_date: string; direction: string | null; has_installments: boolean | null; installment_amount: number | null }>).map((d) => ({
         id: `debt-${d.id}`,
         source: "debt",
         description: `${d.direction === "they_owe" ? "Receber" : "Pagar"} — ${d.name ?? "Dívida"}`,
@@ -118,7 +114,12 @@ export const useUpcomingDueDates = (familyId: string | null | undefined) => {
         routeTarget: `/debts/${d.id}`,
       }));
 
-      // Card invoice due dates within the window
+      // Faturas cujo VENCIMENTO cai na janela [today, end]. Usa o helper canônico
+      // getInvoiceCycleForMonth (fonte única do ciclo, igual Dashboard/Agenda),
+      // parametrizado pelo MÊS DE VENCIMENTO — deste mês e do próximo (a janela de
+      // 7 dias não passa disso). A versão inline antiga parametrizava pelo mês de
+      // FECHAMENTO e, com dueDay < closingDay, perdia a fatura que vence no começo
+      // do mês (fechou no mês anterior) — divergindo da Agenda/Dashboard.
       const cards = (cardsRes.data ?? []) as Array<{ id: string; name: string; closing_day: number | null; due_day: number | null }>;
       const cardTxs = (cardTxRes.data ?? []) as Array<{ card_id: string | null; amount: number; date: string }>;
       const cardItems: DueItem[] = [];
@@ -126,22 +127,13 @@ export const useUpcomingDueDates = (familyId: string | null | undefined) => {
         const closingDay = Number(card.closing_day || 0);
         const dueDay = Number(card.due_day || 0);
         if (!closingDay || !dueDay) return;
-        // Look at this and next month's cycles
         for (let offset = 0; offset <= 1; offset++) {
           const ref = new Date(todayDate.getFullYear(), todayDate.getMonth() + offset, 1);
-          const closingDate = clampDay(ref.getFullYear(), ref.getMonth(), closingDay);
-          const dueOffset = dueDay >= closingDay ? 0 : 1;
-          const dueDate = clampDay(ref.getFullYear(), ref.getMonth() + dueOffset, dueDay);
-          const dueIso = toIso(dueDate);
+          const cycle = getInvoiceCycleForMonth(closingDay, dueDay, ref.getFullYear(), ref.getMonth());
+          const dueIso = toIso(cycle.dueDate);
           if (dueIso < today || dueIso > end) continue;
-
-          // Convenção alinhada com lib/cardCycle: [prevClosing (inclusive),
-          // closingDate - 1]. Antes deslocava 1 dia (F54).
-          const prevClosing = clampDay(ref.getFullYear(), ref.getMonth() - 1, closingDay);
-          const startIso = toIso(prevClosing);
-          const cycleEndDate = new Date(closingDate);
-          cycleEndDate.setDate(cycleEndDate.getDate() - 1);
-          const endIsoCycle = toIso(cycleEndDate);
+          const startIso = toIso(cycle.cycleStart);
+          const endIsoCycle = toIso(cycle.cycleEnd);
           const total = cardTxs
             .filter((tx) => tx.card_id === card.id && tx.date >= startIso && tx.date <= endIsoCycle)
             .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
