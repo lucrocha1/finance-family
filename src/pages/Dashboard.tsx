@@ -39,6 +39,7 @@ import { computeSpentByCard } from "@/lib/cardSpent";
 import { useChartColors } from "@/lib/chartColors";
 import { computeProjectedCash, type DebtForProjection } from "@/lib/projectedCash";
 import { cn } from "@/lib/utils";
+import { isInvoicePayment } from "@/lib/invoicePayment";
 
 type TransactionRow = {
   id: string;
@@ -223,7 +224,7 @@ const DashboardPage = () => {
           .lte("date", toISODate(monthEnd)),
         supabase
           .from("transactions")
-          .select("id, family_id, user_id, card_id, category_id, amount, type, status, date, is_installment, is_recurring")
+          .select("id, family_id, user_id, card_id, category_id, amount, type, status, date, description, is_installment, is_recurring")
           .gte("date", toISODate(prevMonthStart))
           .lte("date", toISODate(prevMonthEnd)),
         supabase.from("accounts").select("id, family_id, balance"),
@@ -300,26 +301,6 @@ const DashboardPage = () => {
     void loadDashboard();
   }, [family?.id, monthEnd, monthStart, prevMonthEnd, prevMonthStart, recurrenceVersion]);
 
-  // Transações de cartão cuja fatura VENCE no mês visualizado, separadas
-  // por status. Usadas para popular o donut "A Pagar" (pending) e "Pago"
-  // (paid) com as categorias originais das compras. Declarado ANTES de
-  // totals/donutData porque eles dependem disso.
-  const cardTxsDueInMonth = useMemo(() => {
-    const result: Array<typeof cardTransactions[number]> = [];
-    cards.forEach((card) => {
-      const closingDay = Number(card.closing_day || 0);
-      const dueDay = Number(card.due_day || 0);
-      if (!closingDay || !dueDay) return;
-      const cycle = getInvoiceCycleForMonth(closingDay, dueDay, monthStart.getFullYear(), monthStart.getMonth());
-      const cycleStartIso = toISODate(cycle.cycleStart);
-      const cycleEndIso = toISODate(cycle.cycleEnd);
-      cardTransactions
-        .filter((tx) => tx.card_id === card.id && tx.date >= cycleStartIso && tx.date <= cycleEndIso)
-        .forEach((tx) => result.push(tx));
-    });
-    return result;
-  }, [cards, cardTransactions, monthStart]);
-
   // Impacto de uma dívida no fluxo (montante que sai/entra do caixa).
   // Para parceladas, usa a próxima parcela; à vista, usa o restante.
   const debtCashAmount = (debt: DebtForProjection) => {
@@ -348,20 +329,21 @@ const DashboardPage = () => {
   }, [activeDebts, monthEnd]);
 
   const totals = useMemo(() => {
-    const isCash = (tx: TransactionRow) => !tx.card_id;
-    const isPaid = (tx: TransactionRow) => tx.status === "paid";
-    // REALIZADO = caixa que JÁ entrou/saiu no mês (não-cartão, pago). Mesma
-    // metodologia do "realizado" dos Relatórios, pra as telas conversarem.
-    const realizedIncome = transactions.filter((tx) => tx.type === "income" && isCash(tx) && isPaid(tx)).reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
-    const realizedExpense = transactions.filter((tx) => tx.type === "expense" && isCash(tx) && isPaid(tx)).reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
-    // PROJEÇÃO = esperado no mês: caixa pago + a receber/pagar pendente +
-    // fatura de cartão que vence no mês + dívidas do mês (i_owe despesa,
-    // they_owe receita). Responde "com quanto vou ficar no fim do mês".
-    const incomeCashAll = transactions.filter((tx) => tx.type === "income" && isCash(tx)).reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
-    const expenseCashAll = transactions.filter((tx) => tx.type === "expense" && isCash(tx)).reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
-    const expenseCardPending = cardTxsDueInMonth
-      .filter((tx) => tx.status !== "paid")
-      .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+    // O pagamento de fatura é transferência entre conta e cartão (neutro ao
+    // patrimônio): a compra no cartão já reduziu o patrimônio na DATA DA COMPRA,
+    // pagar a fatura só move dinheiro. Fica fora do gasto — assim "Despesas"
+    // bate com Transações/Relatórios/donut (todos usam isInvoicePayment).
+    const notPayment = (tx: TransactionRow) => !isInvoicePayment(tx);
+    // REALIZADO = o que já aconteceu, mesma regra do "realizado" dos Relatórios:
+    // pago OU compra no cartão (conta pela data da compra, independe da fatura).
+    const isRealized = (tx: TransactionRow) => tx.status === "paid" || Boolean(tx.card_id);
+    const realizedIncome = transactions.filter((tx) => tx.type === "income" && notPayment(tx) && isRealized(tx)).reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+    const realizedExpense = transactions.filter((tx) => tx.type === "expense" && notPayment(tx) && isRealized(tx)).reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+    // PROJEÇÃO do mês = tudo do mês por data (pago + a receber/pagar pendente)
+    // mais as dívidas do mês (i_owe despesa, they_owe receita). Compra no cartão
+    // conta pela data; o pagamento de fatura continua fora.
+    const allIncome = transactions.filter((tx) => tx.type === "income" && notPayment(tx)).reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+    const allExpense = transactions.filter((tx) => tx.type === "expense" && notPayment(tx)).reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
     let debtExpense = 0;
     let debtIncome = 0;
     monthDebts.forEach((d) => {
@@ -370,11 +352,11 @@ const DashboardPage = () => {
       if (d.direction === "they_owe") debtIncome += amount;
       else debtExpense += amount;
     });
-    const projectedIncome = incomeCashAll + debtIncome;
-    const projectedExpense = expenseCashAll + expenseCardPending + debtExpense;
+    const projectedIncome = allIncome + debtIncome;
+    const projectedExpense = allExpense + debtExpense;
     // Realizado do mês anterior (mesma metodologia) pra uma variação % justa.
-    const prevRealizedIncome = previousTransactions.filter((tx) => tx.type === "income" && isCash(tx) && isPaid(tx)).reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
-    const prevRealizedExpense = previousTransactions.filter((tx) => tx.type === "expense" && isCash(tx) && isPaid(tx)).reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+    const prevRealizedIncome = previousTransactions.filter((tx) => tx.type === "income" && notPayment(tx) && (tx.status === "paid" || Boolean(tx.card_id))).reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+    const prevRealizedExpense = previousTransactions.filter((tx) => tx.type === "expense" && notPayment(tx) && (tx.status === "paid" || Boolean(tx.card_id))).reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
     return {
       realizedIncome,
       realizedExpense,
@@ -384,7 +366,7 @@ const DashboardPage = () => {
       projectedBalance: projectedIncome - projectedExpense,
       previousRealizedBalance: prevRealizedIncome - prevRealizedExpense,
     };
-  }, [cardTxsDueInMonth, monthDebts, previousTransactions, transactions]);
+  }, [monthDebts, previousTransactions, transactions]);
 
   // Resumo de investimentos: total investido, valor atual e rentabilidade.
   const investmentTotals = useMemo(() => {
@@ -558,10 +540,9 @@ const DashboardPage = () => {
     transactions
       .filter((tx) => tx.type === "expense")
       // Exclui o lançamento não-cartão "Pagamento Fatura": as compras do cartão
-      // já entram por suas categorias, então contar o pagamento também dobraria
-      // o valor (F61). Agora funciona de fato — description passou a ser buscada
-      // no SELECT (antes o filtro era inerte e a fatura contava em dobro).
-      .filter((tx) => !(tx.description ?? "").startsWith("Pagamento Fatura"))
+      // já entram por suas categorias, então contar o pagamento dobraria o valor
+      // e entope "Sem categoria". Mesmo helper canônico de todas as telas.
+      .filter((tx) => !isInvoicePayment(tx))
       .filter((tx) => (categoriesTab === "paid" ? tx.status === "paid" : tx.status !== "paid"))
       .forEach(addTx);
 
@@ -896,7 +877,7 @@ const DashboardPage = () => {
         <Card className="glass-card rounded-xl border-border bg-card">
           <CardHeader className="space-y-3">
             <p className="text-xs font-semibold uppercase tracking-[0.5px] text-muted-foreground">Fluxo do período</p>
-            <CardDescription className="text-sm text-muted-foreground">Realizado no mês (caixa) + projeção com o que ainda falta</CardDescription>
+            <CardDescription className="text-sm text-muted-foreground">Gasto realizado no mês + projeção com o que ainda falta</CardDescription>
             <div className="flex items-baseline gap-3">
               <CardTitle className={cn("text-3xl font-bold tabular-nums", totals.realizedBalance >= 0 ? "text-success" : "text-destructive")}>
                 {ptCurrency.format(totals.realizedBalance)}

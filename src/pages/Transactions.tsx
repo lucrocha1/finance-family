@@ -43,6 +43,7 @@ import { priorityLabel, type PlannedItemRow } from "@/lib/plannedItems";
 import { PlannedItemDialog } from "@/components/PlannedItemDialog";
 import { SchedulePlannedDialog } from "@/components/SchedulePlannedDialog";
 import { cn } from "@/lib/utils";
+import { isInvoicePayment } from "@/lib/invoicePayment";
 
 type TxType = "income" | "expense" | "transfer" | string;
 type TxStatus = "paid" | "pending" | string | null;
@@ -355,7 +356,9 @@ const TransactionsPage = () => {
 
   const totals = useMemo(() => {
     const income = filtered.filter((tx) => tx.type === "income").reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
-    const expense = filtered.filter((tx) => tx.type === "expense").reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+    // Exclui "Pagamento Fatura": debita a conta, mas não é gasto novo (as compras
+    // do cartão já entraram na data da compra). Contá-lo dobraria o gasto.
+    const expense = filtered.filter((tx) => tx.type === "expense" && !isInvoicePayment(tx)).reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
     return { income, expense, balance: income - expense };
   }, [filtered]);
 
@@ -1226,14 +1229,17 @@ const TransactionsPage = () => {
                     const installmentLabel = tx.installment_current && tx.installment_total ? ` (${tx.installment_current}/${tx.installment_total})` : "";
                     const isRecurringRow = Boolean(tx.is_recurring) || Boolean(tx.recurrence_parent_id);
                     const linkedMember = tx.linked_user_id ? memberMap.get(tx.linked_user_id) : null;
+                    const isInvoicePay = isInvoicePayment(tx);
                     const valuePrefix = tx.type === "income" ? "+" : tx.type === "expense" ? "-" : "";
-                    const valueColor = tx.type === "income" ? "text-success" : tx.type === "expense" ? "text-destructive" : "text-info";
+                    // Pagamento de fatura debita a conta mas não é gasto novo — mostrado
+                    // como transferência (info), não como despesa vermelha.
+                    const valueColor = isInvoicePay ? "text-info" : tx.type === "income" ? "text-success" : tx.type === "expense" ? "text-destructive" : "text-info";
 
                     return (
                       <TableRow key={tx.id} className="group cursor-pointer border-b border-border bg-transparent hover:bg-secondary" onClick={() => openEdit(tx)}>
                         <TableCell className="px-4 py-3 text-sm text-muted-foreground">{formatDateDDMM(tx.date)}</TableCell>
                         <TableCell className="px-4 py-3 text-sm font-medium text-foreground"><span>{tx.description || "Sem descrição"}</span>{installmentLabel && <span className="text-muted-foreground">{installmentLabel}</span>}{isRecurringRow && <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-semibold text-primary"><Repeat className="h-3 w-3" />Recorrente</span>}{tx.linked_pair_id && <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-info/15 px-2 py-0.5 text-[10px] font-semibold text-info">↔ {linkedMember?.name ?? "Vinculada"}</span>}</TableCell>
-                        <TableCell className="px-4 py-3 text-sm text-muted-foreground"><div className="flex items-center gap-2"><span className="h-2 w-2 rounded-full" style={{ backgroundColor: category?.color || "hsl(var(--muted-foreground))" }} />{category?.name || "Sem categoria"}</div></TableCell>
+                        <TableCell className="px-4 py-3 text-sm text-muted-foreground">{isInvoicePay ? (<div className="flex items-center gap-2 text-info"><CreditCard className="h-3.5 w-3.5" />Pagamento de fatura</div>) : (<div className="flex items-center gap-2"><span className="h-2 w-2 rounded-full" style={{ backgroundColor: category?.color || "hsl(var(--muted-foreground))" }} />{category?.name || "Sem categoria"}</div>)}</TableCell>
                         <TableCell className={cn("px-4 py-3 text-sm font-semibold tabular-nums", valueColor)}>
                           {computedStatus !== "paid" && (
                             <span className={cn("mr-2 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold", computedStatus === "overdue" ? "bg-destructive/20 text-destructive" : "bg-warning/20 text-warning")}>{computedStatus === "overdue" ? "Atrasado" : "Pendente"}</span>

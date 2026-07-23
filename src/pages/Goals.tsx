@@ -37,6 +37,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useFamily } from "@/contexts/FamilyContext";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
+import { isInvoicePayment } from "@/lib/invoicePayment";
 
 type Tab = "budget" | "goals";
 type GoalStatus = "active" | "paused" | "completed";
@@ -185,7 +186,7 @@ const GoalsPage = () => {
       // Carregamos todos até o mês selecionado e pegamos o mais recente
       // por categoria no memo budgetByCategory.
       supabase.from("budgets").select("id, category_id, amount, month, year, user_id, family_id"),
-      supabase.from("transactions").select("category_id, amount, type, date").eq("type", "expense").gte("date", from).lte("date", to),
+      supabase.from("transactions").select("category_id, amount, type, date, card_id, description").eq("type", "expense").gte("date", from).lte("date", to),
       supabase.from("goals").select("*").order("created_at", { ascending: false }),
       supabase.from("goal_contributions").select("*").order("date", { ascending: false }),
     ]);
@@ -226,7 +227,10 @@ const GoalsPage = () => {
 
     const expenseMap = new Map<string, number>();
 
-    ((txRes.data as Array<{ category_id: string | null; amount: number }> | null) ?? []).forEach((tx) => {
+    ((txRes.data as Array<{ category_id: string | null; amount: number; card_id: string | null; description: string | null }> | null) ?? []).forEach((tx) => {
+      // Pagamento de fatura não é gasto (as compras já foram lançadas) — não
+      // pode inflar o orçamento nem a categoria "Sem categoria".
+      if (isInvoicePayment(tx)) return;
       const value = Number(tx.amount || 0);
       const key = tx.category_id || "uncategorized";
       expenseMap.set(key, (expenseMap.get(key) ?? 0) + value);

@@ -25,6 +25,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useFamily } from "@/contexts/FamilyContext";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
+import { isInvoicePayment } from "@/lib/invoicePayment";
 
 type PeriodOption = "month" | "3months" | "6months" | "year" | "custom";
 type TxRow = {
@@ -55,12 +56,6 @@ const monthLabel = (key: string) => {
   return new Date(year, month - 1, 1).toLocaleDateString("pt-BR", { month: "short" }).replace(".", "");
 };
 const asSingle = <T,>(v: T | T[] | null | undefined): T | null => (Array.isArray(v) ? (v[0] ?? null) : (v ?? null));
-// "Pagamento Fatura" é uma despesa sem cartão que quita a fatura. As compras do
-// cartão já entram nas despesas (com categoria), então contar o pagamento também
-// dobraria o gasto no mesmo período (F60). Excluímos o pagamento das agregações.
-const isInvoicePayment = (tx: { card_id?: string | null; description?: string | null }) =>
-  !tx.card_id && (tx.description ?? "").startsWith("Pagamento Fatura");
-
 const getRangeFromPeriod = (period: PeriodOption, customFrom: string, customTo: string) => {
   const today = new Date();
   if (period === "custom") {
