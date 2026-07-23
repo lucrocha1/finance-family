@@ -249,6 +249,28 @@ const DEFAULT_MAPPING: ColumnMapping = {
   category: "__none__",
 };
 
+// Casa os nomes de coluna (cabeçalho) com sinônimos comuns, sem acento/caixa,
+// pra pré-preencher o mapeamento automaticamente.
+const MAPPING_SYNONYMS: Record<MappingField, string[]> = {
+  date: ["data", "date", "dt", "vencimento", "dia", "data mov", "data lancamento"],
+  description: ["descricao", "historico", "description", "memo", "lancamento", "detalhe", "estabelecimento", "titulo"],
+  amount: ["valor", "amount", "montante", "quantia", "total"],
+  type: ["tipo", "type", "natureza", "operacao", "d c", "c d"],
+  category: ["categoria", "category", "classificacao"],
+};
+const normForMatch = (s: string) => s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
+const autoDetectMapping = (columnNames: string[]): Partial<ColumnMapping> => {
+  const result: Partial<ColumnMapping> = {};
+  (Object.keys(MAPPING_SYNONYMS) as MappingField[]).forEach((field) => {
+    const match = columnNames.find((col) => {
+      const n = normForMatch(col);
+      return MAPPING_SYNONYMS[field].some((syn) => n === syn || n.includes(syn));
+    });
+    if (match) result[field] = match;
+  });
+  return result;
+};
+
 const ImportCsvPage = () => {
   const { family } = useFamily();
   const { user } = useAuth();
@@ -304,6 +326,23 @@ const ImportCsvPage = () => {
     if (!rowsRaw.length) return [] as string[][];
     return firstRowHeader ? rowsRaw.slice(1) : rowsRaw;
   }, [rowsRaw, firstRowHeader]);
+
+  // Auto-detecção de colunas por cabeçalho: preenche os campos ainda não
+  // mapeados (não sobrescreve escolha manual do usuário). Roda ao (re)carregar o
+  // arquivo ou trocar delimitador/cabeçalho, quando columnNames muda.
+  useEffect(() => {
+    if (columnNames.length === 0) return;
+    const auto = autoDetectMapping(columnNames);
+    setMapping((prev) => {
+      const next = { ...prev };
+      (["date", "description", "amount"] as MappingField[]).forEach((k) => {
+        if (!prev[k] && auto[k]) next[k] = auto[k]!;
+      });
+      if (auto.type && prev.type === "__detect__") next.type = auto.type;
+      if (auto.category && prev.category === "__none__") next.category = auto.category;
+      return next;
+    });
+  }, [columnNames]);
 
   const parsedRows = useMemo<ParsedRow[]>(() => {
     if (!dataRows.length) return [];
@@ -799,6 +838,21 @@ const ImportCsvPage = () => {
               <div className="flex items-center gap-2">
                 <Checkbox id="first-header" checked={firstRowHeader} onCheckedChange={(value) => setFirstRowHeader(Boolean(value))} />
                 <Label htmlFor="first-header">Primeira linha é cabeçalho</Label>
+              </div>
+
+              <div className="space-y-1">
+                <Label>Separador de colunas</Label>
+                <Select value={delimiter} onValueChange={setDelimiter}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value=",">Vírgula ( , )</SelectItem>
+                    <SelectItem value=";">Ponto e vírgula ( ; )</SelectItem>
+                    <SelectItem value={"\t"}>Tabulação</SelectItem>
+                    <SelectItem value="|">Barra ( | )</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
 
               <div className="space-y-1">
