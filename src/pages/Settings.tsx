@@ -36,6 +36,8 @@ import { toast } from "@/components/ui/sonner";
 import { useAuth } from "@/contexts/AuthContext";
 import { useEnablePush } from "@/hooks/useEnablePush";
 import { useNotificationPreferences, type NotificationPrefs } from "@/hooks/useNotificationPreferences";
+import { InstallPushGuide } from "@/components/InstallPushGuide";
+import { isIosDevice, isStandalonePwa } from "@/lib/pwa";
 import { useFamily } from "@/contexts/FamilyContext";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
@@ -743,6 +745,7 @@ const SettingsPage = () => {
 
                 <div className="space-y-3">
                   <Label>Notificações</Label>
+                  <InstallPushGuide />
                   <div className="rounded-lg border border-border bg-secondary/20 p-3">
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0 flex-1">
@@ -753,7 +756,9 @@ const SettingsPage = () => {
                             : pushStatus === "denied"
                               ? "Permissão bloqueada. Habilite manualmente nas configurações do navegador."
                               : pushStatus === "unsupported"
-                                ? "Este navegador não suporta notificações push."
+                                ? (isIosDevice() && !isStandalonePwa()
+                                    ? "Instale o app na tela de início (passos acima) e reabra pra ativar."
+                                    : "Este navegador não suporta notificações push.")
                                 : "Receba alertas de compromissos, orçamento e faturas mesmo com o app fechado."}
                         </p>
                       </div>
