@@ -332,7 +332,9 @@ const CardsPage = () => {
         const limit = Number(card.credit_limit ?? 0);
         const usedPct = limit > 0 ? Math.min((spent / limit) * 100, 100) : 0;
         const available = Math.max(limit - spent, 0);
-        return { ...card, spent, overdue, overdueCount, limit, usedPct, available };
+        const overLimit = limit > 0 && spent > limit;
+        const overAmount = Math.max(spent - limit, 0);
+        return { ...card, spent, overdue, overdueCount, limit, usedPct, available, overLimit, overAmount };
       }),
     [cards, spentMap],
   );
@@ -417,8 +419,13 @@ const CardsPage = () => {
                     <span>
                       {ptCurrency.format(card.spent)} / {ptCurrency.format(card.limit)}
                     </span>
-                    <span>{Math.round(card.usedPct)}%</span>
+                    <span className={card.overLimit ? "font-semibold text-red-300" : ""}>
+                      {card.limit > 0 ? Math.round((card.spent / card.limit) * 100) : 0}%
+                    </span>
                   </div>
+                  {card.overLimit && (
+                    <p className="mt-1 text-xs font-semibold text-red-300">⚠ Limite estourado em {ptCurrency.format(card.overAmount)}</p>
+                  )}
                   {card.overdue > 0 && (
                     <p className="mt-2 text-[11px] text-yellow-200/90">
                       ⚠ {card.overdueCount} {card.overdueCount === 1 ? "compra" : "compras"} de ciclos passados não pagas ({ptCurrency.format(card.overdue)})

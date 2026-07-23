@@ -81,7 +81,7 @@ export const schedulePlannedTransaction = async (
 export const schedulePlannedInvestment = async (
   item: PlannedItemRow,
   date: string,
-  options: { familyId: string | null | undefined; userId: string | null | undefined },
+  options: { familyId: string | null | undefined; userId: string | null | undefined; investmentType?: string },
 ): Promise<{ ok: true; investmentId: string } | { ok: false; message: string }> => {
   if (item.kind !== "investment") {
     return { ok: false, message: "Use schedulePlannedTransaction para itens de transação" };
@@ -95,10 +95,12 @@ export const schedulePlannedInvestment = async (
       family_id: ctx.familyId,
       user_id: ctx.userId,
       name: item.description,
-      type: "fund",
+      // Tipo escolhido pelo usuário (antes fixava "fund"). target_date NÃO é
+      // gravado com a data do aporte — target_date é a META de prazo do
+      // investimento, e sem target_value gerava progresso/exibição enganosos.
+      type: options.investmentType ?? "other",
       amount_invested: item.amount,
       current_value: item.amount,
-      target_date: date,
       notes: item.notes,
     })
     .select("id")

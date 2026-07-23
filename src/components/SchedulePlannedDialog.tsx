@@ -22,6 +22,16 @@ type Props = {
 
 const toIsoDate = (d: Date) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
 
+const INVESTMENT_TYPES: Array<{ value: string; label: string }> = [
+  { value: "stocks", label: "Ações" },
+  { value: "crypto", label: "Cripto" },
+  { value: "fixed_income", label: "Renda fixa" },
+  { value: "fund", label: "Fundos" },
+  { value: "savings", label: "Poupança" },
+  { value: "real_estate", label: "Imóveis" },
+  { value: "other", label: "Outros" },
+];
+
 export const SchedulePlannedDialog = ({ open, item, onClose, onScheduled }: Props) => {
   const { family } = useFamily();
   const { user } = useAuth();
@@ -31,6 +41,7 @@ export const SchedulePlannedDialog = ({ open, item, onClose, onScheduled }: Prop
   const [accounts, setAccounts] = useState<Array<{ id: string; name: string }>>([]);
   const [isInstallment, setIsInstallment] = useState(false);
   const [installments, setInstallments] = useState(2);
+  const [investmentType, setInvestmentType] = useState<string>("other");
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -39,6 +50,7 @@ export const SchedulePlannedDialog = ({ open, item, onClose, onScheduled }: Prop
     setAccountId(item.account_id ?? "");
     setIsInstallment(false);
     setInstallments(2);
+    setInvestmentType("other");
   }, [item, open]);
 
   useEffect(() => {
@@ -71,7 +83,7 @@ export const SchedulePlannedDialog = ({ open, item, onClose, onScheduled }: Prop
     setSaving(true);
 
     if (item.kind === "investment") {
-      const result = await schedulePlannedInvestment(item, date, { familyId: family?.id, userId: user?.id });
+      const result = await schedulePlannedInvestment(item, date, { familyId: family?.id, userId: user?.id, investmentType });
       setSaving(false);
       if (!result.ok) { toast.error(result.message); return; }
       toast.success("Agendado!");
@@ -153,6 +165,22 @@ export const SchedulePlannedDialog = ({ open, item, onClose, onScheduled }: Prop
             <Label className="text-xs text-muted-foreground">{isInstallment ? "Data da 1ª parcela" : "Data"}</Label>
             <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="h-[42px] rounded-lg border-border bg-secondary text-foreground" />
           </div>
+
+          {item.kind === "investment" && (
+            <div className="space-y-2">
+              <Label className="text-xs text-muted-foreground">Tipo do investimento</Label>
+              <Select value={investmentType} onValueChange={setInvestmentType}>
+                <SelectTrigger className="h-[42px] rounded-lg border-border bg-secondary text-foreground">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {INVESTMENT_TYPES.map((t) => (
+                    <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
 
           {item.kind !== "investment" && accounts.length > 0 && (
             <div className="space-y-2">
