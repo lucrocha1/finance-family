@@ -34,11 +34,12 @@ export const InstallPushGuide = () => {
       <div className="rounded-lg border border-primary/40 bg-primary/5 p-3 text-sm">
         <p className="font-medium text-foreground">Instale o app pra receber notificações no iPhone</p>
         <ol className="mt-2 space-y-1 text-xs text-muted-foreground">
-          <li>1. Toque em <span className="font-semibold text-foreground">Compartilhar</span> (ícone de caixa com seta ↑) na barra do Safari.</li>
-          <li>2. Escolha <span className="font-semibold text-foreground">Adicionar à Tela de Início</span>.</li>
-          <li>3. Abra o app pelo novo ícone e volte aqui pra <span className="font-semibold text-foreground">Ativar</span>.</li>
+          <li>1. Abra este site no <span className="font-semibold text-foreground">Safari</span> — no iPhone só ele instala o app direito, mesmo que você use o Chrome no dia a dia.</li>
+          <li>2. Toque em <span className="font-semibold text-foreground">Compartilhar</span> (ícone de caixa com seta ↑).</li>
+          <li>3. Escolha <span className="font-semibold text-foreground">Adicionar à Tela de Início</span>.</li>
+          <li>4. Abra o app pelo novo ícone e volte aqui pra <span className="font-semibold text-foreground">Ativar</span>.</li>
         </ol>
-        <p className="mt-2 text-[11px] text-muted-foreground">No iPhone, o push só funciona com o app aberto pela tela de início (iOS 16.4+).</p>
+        <p className="mt-2 text-[11px] text-muted-foreground">No iPhone o push só funciona com o app aberto pela tela de início (iOS 16.4+). Depois de instalado, você usa pelo ícone — não importa qual navegador.</p>
       </div>
     );
   }
