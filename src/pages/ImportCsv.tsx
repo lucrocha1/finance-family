@@ -657,7 +657,18 @@ const ImportCsvPage = () => {
       family_id: family.id,
     }));
 
-    const { error: insertTxError } = await supabase.from("transactions").insert(payload);
+    // Insere em lotes de 500 pra não estourar limite de payload/timeout em
+    // arquivos grandes (milhares de linhas). Para no primeiro lote com erro;
+    // como o dedup ignora linhas já existentes, um reimport retoma o que faltou.
+    const CHUNK = 500;
+    let insertTxError: { message: string } | null = null;
+    let insertedCount = 0;
+    for (let i = 0; i < payload.length; i += CHUNK) {
+      const slice = payload.slice(i, i + CHUNK);
+      const { error } = await supabase.from("transactions").insert(slice);
+      if (error) { insertTxError = error; break; }
+      insertedCount += slice.length;
+    }
 
     const ignored = parsedRows.length - dedupedRows.length;
     const mappingPayload = {
@@ -672,7 +683,7 @@ const ImportCsvPage = () => {
       await supabase.from("csv_imports").insert({
         filename: file.name,
         status: "error",
-        rows_imported: 0,
+        rows_imported: insertedCount,
         rows_total: parsedRows.length,
         error_message: insertTxError.message,
         column_mapping: mappingPayload,
@@ -683,9 +694,11 @@ const ImportCsvPage = () => {
 
       setResult({
         status: "error",
-        imported: 0,
-        ignored: parsedRows.length,
-        message: insertTxError.message,
+        imported: insertedCount,
+        ignored: parsedRows.length - insertedCount,
+        message: insertedCount > 0
+          ? `${insertedCount} importada(s) antes de falhar. ${insertTxError.message}`
+          : insertTxError.message,
       });
       setImporting(false);
       setStep(4);

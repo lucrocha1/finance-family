@@ -152,6 +152,9 @@ const GoalsPage = () => {
   const [contributionDate, setContributionDate] = useState<Date | undefined>(new Date());
   const [contributionNotes, setContributionNotes] = useState("");
   const [contributionSaving, setContributionSaving] = useState(false);
+  // Paginação da lista de aportes por meta: mostra os N mais recentes e permite
+  // expandir. Evita listas enormes quando uma meta tem muitos aportes.
+  const [contribShowAll, setContribShowAll] = useState<string[]>([]);
 
   const [expandedGoals, setExpandedGoals] = useState<string[]>([]);
 
@@ -711,8 +714,15 @@ const GoalsPage = () => {
 
                       {row.budget && row.limit ? (
                         <>
-                          <div className="h-3 w-full rounded-full bg-secondary">
+                          <div className="relative h-3 w-full rounded-full bg-secondary">
                             <div className={cn("h-3 rounded-full", usageColor)} style={{ width: `${Math.min(usage, 100)}%` }} />
+                            {/* Marcador do limite de alerta (80%): ponto em que a
+                                notificação de orçamento (budget_warn) dispara. */}
+                            <span
+                              className="absolute top-1/2 h-4 w-0.5 -translate-y-1/2 rounded-full bg-foreground/50"
+                              style={{ left: "80%" }}
+                              title="Alerta em 80% do limite"
+                            />
                           </div>
                           <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
                             <span className="text-muted-foreground">
@@ -833,6 +843,8 @@ const GoalsPage = () => {
                 const perMonth = monthsLeft ? remaining / monthsLeft : null;
                 const expanded = expandedGoals.includes(goal.id);
                 const goalContributions = contributionsByGoal.get(goal.id) ?? [];
+                const showAllContrib = contribShowAll.includes(goal.id);
+                const visibleContributions = showAllContrib ? goalContributions : goalContributions.slice(0, 6);
 
                 return (
                   <Card key={goal.id} className="rounded-xl border-border bg-card transition-all hover:border-accent/70">
@@ -898,16 +910,28 @@ const GoalsPage = () => {
                           {goalContributions.length === 0 ? (
                             <p className="text-sm text-muted-foreground">Sem aportes registrados</p>
                           ) : (
-                            goalContributions.map((item) => (
-                              <div key={item.id} className="grid grid-cols-[auto_1fr_auto_auto] items-center gap-2 text-sm">
-                                <span className="text-muted-foreground">{new Date(`${item.date}T00:00:00`).toLocaleDateString("pt-BR")}</span>
-                                <span className="font-medium text-foreground">{ptCurrency.format(item.amount)}</span>
-                                <span className="truncate text-muted-foreground">{item.notes || "—"}</span>
-                                <Button size="icon" variant="ghost" aria-label="Excluir aporte" className="h-7 w-7 text-muted-foreground hover:text-destructive" onClick={() => setContributionToDelete(item)}>
-                                  <X className="h-3.5 w-3.5" />
+                            <>
+                              {visibleContributions.map((item) => (
+                                <div key={item.id} className="grid grid-cols-[auto_1fr_auto_auto] items-center gap-2 text-sm">
+                                  <span className="text-muted-foreground">{new Date(`${item.date}T00:00:00`).toLocaleDateString("pt-BR")}</span>
+                                  <span className="font-medium text-foreground">{ptCurrency.format(item.amount)}</span>
+                                  <span className="truncate text-muted-foreground">{item.notes || "—"}</span>
+                                  <Button size="icon" variant="ghost" aria-label="Excluir aporte" className="h-7 w-7 text-muted-foreground hover:text-destructive" onClick={() => setContributionToDelete(item)}>
+                                    <X className="h-3.5 w-3.5" />
+                                  </Button>
+                                </div>
+                              ))}
+                              {goalContributions.length > 6 ? (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="w-full text-xs text-muted-foreground"
+                                  onClick={() => setContribShowAll((prev) => (showAllContrib ? prev.filter((id) => id !== goal.id) : [...prev, goal.id]))}
+                                >
+                                  {showAllContrib ? "Mostrar menos" : `Ver todos os ${goalContributions.length} aportes`}
                                 </Button>
-                              </div>
-                            ))
+                              ) : null}
+                            </>
                           )}
                         </div>
                       ) : null}

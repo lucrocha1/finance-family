@@ -12,6 +12,8 @@ import {
   Plus,
   RefreshCw,
   Send,
+  TrendingDown,
+  TrendingUp,
 } from "lucide-react";
 import {
   Area,
@@ -164,6 +166,7 @@ const DashboardPage = () => {
   // Período / gráfico de Fluxo de Caixa (mês visualizado).
   const [activeDebts, setActiveDebts] = useState<(DebtForProjection & { due_date: string })[]>([]);
   const [scheduledMonth, setScheduledMonth] = useState<ScheduledPaymentRow[]>([]);
+  const [investments, setInvestments] = useState<{ type: string; amount_invested: number; current_value: number }[]>([]);
 
   const [categoriesTab, setCategoriesTab] = useState<"paid" | "pending">("paid");
   const [incomeTab, setIncomeTab] = useState<"paid" | "pending">("paid");
@@ -192,6 +195,7 @@ const DashboardPage = () => {
       setCumulativePendingTxs([]);
       setActiveDebts([]);
       setScheduledMonth([]);
+      setInvestments([]);
       return;
     }
 
@@ -211,7 +215,7 @@ const DashboardPage = () => {
       // usuário; filtrar family_id escondia linhas cujo family_id ficou defasado
       // (troca/entrada de família), fazendo o Dashboard divergir de
       // Reports/Transactions/Cards/Schedule que já removeram esse filtro.
-      const [txCurrent, txPrev, accountsRes, cardsRes, schedMonthRes, cardCommitRes, cardTxRes, cumulativePendingRes, activeDebtsRes] = await Promise.all([
+      const [txCurrent, txPrev, accountsRes, cardsRes, schedMonthRes, cardCommitRes, cardTxRes, cumulativePendingRes, activeDebtsRes, investmentsRes] = await Promise.all([
         supabase
           .from("transactions")
           .select("id, family_id, user_id, card_id, category_id, amount, type, status, date, description, is_installment, is_recurring, categories ( id, name, icon, color )")
@@ -276,6 +280,8 @@ const DashboardPage = () => {
           .not("due_date", "is", null)
           .gte("due_date", debtStartIso)
           .lte("due_date", cumulativeEndIso),
+        // Investimentos do usuário (RLS isola) — resumo no Dashboard.
+        supabase.from("investments").select("type, amount_invested, current_value"),
       ]);
 
       setTransactions((txCurrent.data as TransactionRow[] | null) ?? []);
@@ -287,6 +293,7 @@ const DashboardPage = () => {
       setCumulativePendingTxs((cumulativePendingRes.data as Pick<TransactionRow, "id" | "card_id" | "amount" | "type" | "status" | "date">[] | null) ?? []);
       setActiveDebts((activeDebtsRes.data as (DebtForProjection & { due_date: string })[] | null) ?? []);
       setScheduledMonth((schedMonthRes.data as ScheduledPaymentRow[] | null) ?? []);
+      setInvestments((investmentsRes.data as { type: string; amount_invested: number; current_value: number }[] | null) ?? []);
       setLoading(false);
     };
 
@@ -378,6 +385,15 @@ const DashboardPage = () => {
       previousRealizedBalance: prevRealizedIncome - prevRealizedExpense,
     };
   }, [cardTxsDueInMonth, monthDebts, previousTransactions, transactions]);
+
+  // Resumo de investimentos: total investido, valor atual e rentabilidade.
+  const investmentTotals = useMemo(() => {
+    const invested = investments.reduce((sum, i) => sum + Number(i.amount_invested || 0), 0);
+    const current = investments.reduce((sum, i) => sum + Number(i.current_value || 0), 0);
+    const gain = current - invested;
+    const gainPct = invested > 0 ? (gain / invested) * 100 : 0;
+    return { invested, current, gain, gainPct, count: investments.length };
+  }, [investments]);
 
   const balanceVariation = useMemo(() => {
     // Realizado atual vs realizado anterior (mesma metodologia dos dois lados),
@@ -933,6 +949,48 @@ const DashboardPage = () => {
               <p className="text-lg font-bold tabular-nums">{quickSummary.recurringCount}</p>
               <p className="mt-1 text-xs text-muted-foreground">No período</p>
             </div>
+          </CardContent>
+        </Card>
+
+        <Card className="rounded-xl border-border bg-card">
+          <CardHeader className="space-y-1">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-lg font-semibold">Investimentos</CardTitle>
+              <Link to="/investments" className="text-sm font-medium text-primary hover:opacity-80">Ver todos →</Link>
+            </div>
+          </CardHeader>
+          <CardContent>
+            {investmentTotals.count === 0 ? (
+              <div className="flex min-h-[120px] flex-col items-center justify-center gap-2 text-center">
+                <TrendingUp className="h-8 w-8 text-muted-foreground opacity-50" />
+                <p className="text-sm text-muted-foreground">Nenhum investimento cadastrado</p>
+                <Link to="/investments" className="text-sm font-medium text-primary hover:opacity-80">+ Cadastrar</Link>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.5px] text-muted-foreground">Valor atual</p>
+                  <div className="flex items-baseline gap-2">
+                    <p className="text-2xl font-bold tabular-nums text-foreground">{ptCurrency.format(investmentTotals.current)}</p>
+                    <span className={cn("flex items-center gap-0.5 text-sm font-semibold", investmentTotals.gain >= 0 ? "text-success" : "text-destructive")}>
+                      {investmentTotals.gain >= 0 ? <TrendingUp className="h-3.5 w-3.5" /> : <TrendingDown className="h-3.5 w-3.5" />}
+                      {investmentTotals.gainPct >= 0 ? "+" : ""}{investmentTotals.gainPct.toFixed(1)}%
+                    </span>
+                  </div>
+                </div>
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">Investido</span>
+                  <span className="font-semibold tabular-nums text-foreground">{ptCurrency.format(investmentTotals.invested)}</span>
+                </div>
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">Rentabilidade</span>
+                  <span className={cn("font-semibold tabular-nums", investmentTotals.gain >= 0 ? "text-success" : "text-destructive")}>
+                    {investmentTotals.gain >= 0 ? "+" : ""}{ptCurrency.format(investmentTotals.gain)}
+                  </span>
+                </div>
+                <p className="text-xs text-muted-foreground">{investmentTotals.count} ativo{investmentTotals.count === 1 ? "" : "s"}</p>
+              </div>
+            )}
           </CardContent>
         </Card>
 

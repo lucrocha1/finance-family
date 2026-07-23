@@ -138,21 +138,28 @@ export const generateRecurrencesForFamily = async (
     let nextDate = addInterval(latestDate, parent.recurrence_type, parent.recurrence_day);
     const toInsert: Record<string, unknown>[] = [];
     while (nextDate <= cap) {
-      toInsert.push({
-        family_id: parent.family_id,
-        user_id: authUserId,
-        type: parent.type,
-        description: parent.description,
-        amount: parent.amount,
-        date: nextDate,
-        notes: parent.notes,
-        category_id: parent.category_id,
-        account_id: parent.account_id,
-        card_id: parent.card_id,
-        status: "pending",
-        is_recurring: false,
-        recurrence_parent_id: parent.id,
-      });
+      // Não faz backfill retroativo: se o parent começa no passado (ex.: assinatura
+      // cadastrada com data de início antiga) e ainda não tem ocorrências, o gerador
+      // avançaria criando várias ocorrências passadas como "pending" — que apareceriam
+      // como atrasadas falsas. Só materializamos de hoje em diante; as passadas são
+      // puladas (o parent original, criado pelo usuário, permanece intacto).
+      if (nextDate >= today) {
+        toInsert.push({
+          family_id: parent.family_id,
+          user_id: authUserId,
+          type: parent.type,
+          description: parent.description,
+          amount: parent.amount,
+          date: nextDate,
+          notes: parent.notes,
+          category_id: parent.category_id,
+          account_id: parent.account_id,
+          card_id: parent.card_id,
+          status: "pending",
+          is_recurring: false,
+          recurrence_parent_id: parent.id,
+        });
+      }
       nextDate = addInterval(nextDate, parent.recurrence_type, parent.recurrence_day);
     }
 

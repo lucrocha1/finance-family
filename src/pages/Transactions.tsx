@@ -74,7 +74,6 @@ type TransactionRow = {
   categories?: { id?: string; name?: string; color?: string | null; type?: string | null; icon?: string | null } | { id?: string; name?: string; color?: string | null; type?: string | null; icon?: string | null }[] | null;
   accounts?: { id?: string; name?: string; institution?: string | null } | { id?: string; name?: string; institution?: string | null }[] | null;
   cards?: { id?: string; name?: string; brand?: string | null } | { id?: string; name?: string; brand?: string | null }[] | null;
-  profiles?: { full_name?: string | null; email?: string | null } | { full_name?: string | null; email?: string | null }[] | null;
 };
 
 type CategoryRow = { id: string; name: string; color: string | null; type: string | null; icon: string | null };
@@ -725,7 +724,7 @@ const TransactionsPage = () => {
       });
       const { error } = await supabase.from("transactions").insert(rows);
       if (error) errorMessage = error.message;
-    } else if (linkedMemberId && linkedMemberId !== "none" && parsed.data.type !== "transfer" && !parsed.data.isInstallment) {
+    } else if (linkedMemberId && linkedMemberId !== "none" && !parsed.data.isInstallment) {
       // Transação vinculada com outro membro: cria o par via RPC.
       // O espelho aparece pra outra pessoa com tipo invertido + status pending.
       // Se for recorrente, ambos os parents nascem com is_recurring=true e
@@ -742,8 +741,10 @@ const TransactionsPage = () => {
         p_type: parsed.data.type,
         p_status: baseStatus,
         p_other_user_id: linkedMemberId,
-        p_category_id: parsed.data.type === "transfer" ? null : parsed.data.categoryId,
-        p_account_id: parsed.data.type === "transfer" ? parsed.data.fromAccountId : parsed.data.type === "expense" && parsed.data.cardId ? null : parsed.data.accountId,
+        // Transação vinculada nunca é transferência (só expense/income mirram
+        // pro outro membro), então a conta é null quando é compra no cartão.
+        p_category_id: parsed.data.categoryId,
+        p_account_id: parsed.data.type === "expense" && parsed.data.cardId ? null : parsed.data.accountId,
         p_notes: parsed.data.notes?.trim() || null,
         p_is_recurring: recurringEnabled,
         p_recurrence_type: recurringEnabled ? parsed.data.recurrenceType : null,
@@ -1219,9 +1220,8 @@ const TransactionsPage = () => {
                     const category = asSingle(tx.categories);
                     const account = asSingle(tx.accounts);
                     const card = asSingle(tx.cards);
-                    const profileJoined = asSingle(tx.profiles);
                     const member = tx.user_id ? memberMap.get(tx.user_id) : null;
-                    const memberName = member?.name || profileJoined?.full_name?.split(" ")[0] || "Usuário";
+                    const memberName = member?.name || "Usuário";
                     const memberInitials = member?.initials || memberName.slice(0, 1).toUpperCase();
                     const installmentLabel = tx.installment_current && tx.installment_total ? ` (${tx.installment_current}/${tx.installment_total})` : "";
                     const isRecurringRow = Boolean(tx.is_recurring) || Boolean(tx.recurrence_parent_id);
