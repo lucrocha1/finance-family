@@ -342,12 +342,19 @@ const DashboardPage = () => {
 
   const totals = useMemo(() => {
     const isCash = (tx: TransactionRow) => !tx.card_id;
-    const incomeTx = transactions.filter((tx) => tx.type === "income" && isCash(tx)).reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
-    const expenseDirect = transactions.filter((tx) => tx.type === "expense" && isCash(tx)).reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+    const isPaid = (tx: TransactionRow) => tx.status === "paid";
+    // REALIZADO = caixa que JÁ entrou/saiu no mês (não-cartão, pago). Mesma
+    // metodologia do "realizado" dos Relatórios, pra as telas conversarem.
+    const realizedIncome = transactions.filter((tx) => tx.type === "income" && isCash(tx) && isPaid(tx)).reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+    const realizedExpense = transactions.filter((tx) => tx.type === "expense" && isCash(tx) && isPaid(tx)).reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+    // PROJEÇÃO = esperado no mês: caixa pago + a receber/pagar pendente +
+    // fatura de cartão que vence no mês + dívidas do mês (i_owe despesa,
+    // they_owe receita). Responde "com quanto vou ficar no fim do mês".
+    const incomeCashAll = transactions.filter((tx) => tx.type === "income" && isCash(tx)).reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+    const expenseCashAll = transactions.filter((tx) => tx.type === "expense" && isCash(tx)).reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
     const expenseCardPending = cardTxsDueInMonth
       .filter((tx) => tx.status !== "paid")
       .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
-    // Dívidas vencendo no mês: i_owe entra como despesa, they_owe como receita.
     let debtExpense = 0;
     let debtIncome = 0;
     monthDebts.forEach((d) => {
@@ -356,23 +363,31 @@ const DashboardPage = () => {
       if (d.direction === "they_owe") debtIncome += amount;
       else debtExpense += amount;
     });
-    const income = incomeTx + debtIncome;
-    const expense = expenseDirect + expenseCardPending + debtExpense;
-    const previousIncome = previousTransactions.filter((tx) => tx.type === "income" && isCash(tx)).reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
-    const previousExpense = previousTransactions.filter((tx) => tx.type === "expense" && isCash(tx)).reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
-    return { income, expense, balance: income - expense, cashBalance: incomeTx - expenseDirect, previousBalance: previousIncome - previousExpense };
+    const projectedIncome = incomeCashAll + debtIncome;
+    const projectedExpense = expenseCashAll + expenseCardPending + debtExpense;
+    // Realizado do mês anterior (mesma metodologia) pra uma variação % justa.
+    const prevRealizedIncome = previousTransactions.filter((tx) => tx.type === "income" && isCash(tx) && isPaid(tx)).reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+    const prevRealizedExpense = previousTransactions.filter((tx) => tx.type === "expense" && isCash(tx) && isPaid(tx)).reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+    return {
+      realizedIncome,
+      realizedExpense,
+      realizedBalance: realizedIncome - realizedExpense,
+      projectedIncome,
+      projectedExpense,
+      projectedBalance: projectedIncome - projectedExpense,
+      previousRealizedBalance: prevRealizedIncome - prevRealizedExpense,
+    };
   }, [cardTxsDueInMonth, monthDebts, previousTransactions, transactions]);
 
   const balanceVariation = useMemo(() => {
-    // Compara CAIXA vs CAIXA (mesma metodologia nos dois lados). Antes, o lado
-    // atual usava balance (com fatura pendente + dívidas) e o anterior só caixa,
-    // produzindo uma variação percentual enganosa (F58/F62).
-    const current = totals.cashBalance;
-    const previous = totals.previousBalance;
+    // Realizado atual vs realizado anterior (mesma metodologia dos dois lados),
+    // pra o % descrever exatamente o número grande do card (F58/F62).
+    const current = totals.realizedBalance;
+    const previous = totals.previousRealizedBalance;
     const improved = current >= previous;
     const percentage = previous === 0 ? (current === 0 ? 0 : 100) : Math.abs(((current - previous) / previous) * 100);
     return { improved, value: percentage };
-  }, [totals.cashBalance, totals.previousBalance]);
+  }, [totals.realizedBalance, totals.previousRealizedBalance]);
 
   const totalBankBalance = useMemo(() => accounts.reduce((sum, account) => sum + Number(account.balance || 0), 0), [accounts]);
 
@@ -747,7 +762,7 @@ const DashboardPage = () => {
               <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
                 <p className="text-sm font-semibold text-foreground">{formatCompactBRL(donutData.total)}</p>
                 <p className="text-xs uppercase tracking-[0.5px] text-muted-foreground">TOTAL</p>
-                {!donutData.rows.length && <p className="mt-2 text-xs text-muted-foreground">Sem despesas no período</p>}
+                {!loading && !donutData.rows.length && <p className="mt-2 text-xs text-muted-foreground">Sem despesas no período</p>}
               </div>
             </div>
 
@@ -801,7 +816,7 @@ const DashboardPage = () => {
               <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
                 <p className="text-sm font-semibold text-foreground">{formatCompactBRL(incomeDonutData.total)}</p>
                 <p className="text-xs uppercase tracking-[0.5px] text-muted-foreground">TOTAL</p>
-                {!incomeDonutData.rows.length && <p className="mt-2 text-xs text-muted-foreground">Sem receitas no período</p>}
+                {!loading && !incomeDonutData.rows.length && <p className="mt-2 text-xs text-muted-foreground">Sem receitas no período</p>}
               </div>
             </div>
 
@@ -858,35 +873,38 @@ const DashboardPage = () => {
                 </AreaChart>
               </ResponsiveContainer>
             </div>
-            {!flowData.some((row) => row.change !== 0) && <p className="mt-2 text-center text-sm text-muted-foreground">Sem movimentações no período</p>}
+            {!loading && !flowData.some((row) => row.change !== 0) && <p className="mt-2 text-center text-sm text-muted-foreground">Sem movimentações no período</p>}
           </CardContent>
         </Card>
 
         <Card className="glass-card rounded-xl border-border bg-card">
           <CardHeader className="space-y-3">
             <p className="text-xs font-semibold uppercase tracking-[0.5px] text-muted-foreground">Fluxo do período</p>
-            <CardDescription className="text-sm text-muted-foreground">Receitas menos despesas no mês</CardDescription>
+            <CardDescription className="text-sm text-muted-foreground">Realizado no mês (caixa) + projeção com o que ainda falta</CardDescription>
             <div className="flex items-baseline gap-3">
-              <CardTitle className={cn("text-3xl font-bold tabular-nums", totals.balance >= 0 ? "text-success" : "text-destructive")}>
-                {ptCurrency.format(totals.balance)}
+              <CardTitle className={cn("text-3xl font-bold tabular-nums", totals.realizedBalance >= 0 ? "text-success" : "text-destructive")}>
+                {ptCurrency.format(totals.realizedBalance)}
               </CardTitle>
               <span className={cn("text-sm font-semibold", balanceVariation.improved ? "text-success" : "text-destructive")}>
                 {balanceVariation.improved ? "↗" : "↘"} {balanceVariation.value.toFixed(1)}%
               </span>
             </div>
+            <p className="text-xs text-muted-foreground">Realizado · vs. {ptCurrency.format(totals.previousRealizedBalance)} no mês anterior</p>
           </CardHeader>
           <CardContent className="space-y-2 text-sm text-muted-foreground">
             <div className="flex items-center justify-between">
-              <span>Receitas</span>
-              <span className="font-semibold tabular-nums text-success">{ptCurrency.format(totals.income)}</span>
+              <span>Receitas (realizado)</span>
+              <span className="font-semibold tabular-nums text-success">{ptCurrency.format(totals.realizedIncome)}</span>
             </div>
             <div className="flex items-center justify-between">
-              <span>Despesas</span>
-              <span className="font-semibold tabular-nums text-destructive">{ptCurrency.format(totals.expense)}</span>
+              <span>Despesas (realizado)</span>
+              <span className="font-semibold tabular-nums text-destructive">{ptCurrency.format(totals.realizedExpense)}</span>
             </div>
-            <div className="border-t border-border pt-2 text-xs">
-              vs. {ptCurrency.format(totals.previousBalance)} no período anterior
+            <div className="mt-1 flex items-center justify-between border-t border-border pt-2">
+              <span className="font-medium text-foreground">Projeção do mês</span>
+              <span className={cn("font-bold tabular-nums", totals.projectedBalance >= 0 ? "text-success" : "text-destructive")}>{ptCurrency.format(totals.projectedBalance)}</span>
             </div>
+            <p className="text-xs text-muted-foreground">Inclui a receber/pagar pendente, fatura do cartão e dívidas do mês</p>
           </CardContent>
         </Card>
 
@@ -897,12 +915,12 @@ const DashboardPage = () => {
           <CardContent className="grid grid-cols-2 gap-3">
             <div className="rounded-lg border border-border bg-secondary/30 p-3">
               <div className="mb-2 flex items-center gap-2 text-success"><span className="flex h-6 w-6 items-center justify-center rounded-full bg-success/20"><ArrowUpRight className="h-3.5 w-3.5" /></span><span className="text-sm font-semibold">Receitas</span></div>
-              <p className="text-lg font-bold tabular-nums">{ptCurrency.format(totals.income)}</p>
+              <p className="text-lg font-bold tabular-nums">{ptCurrency.format(totals.realizedIncome)}</p>
               <p className="mt-1 text-xs text-muted-foreground">Previsto: {ptCurrency.format(quickSummary.predictedIncome)}</p>
             </div>
             <div className="rounded-lg border border-border bg-secondary/30 p-3">
               <div className="mb-2 flex items-center gap-2 text-destructive"><span className="flex h-6 w-6 items-center justify-center rounded-full bg-destructive/20"><ArrowDownRight className="h-3.5 w-3.5" /></span><span className="text-sm font-semibold">Despesas</span></div>
-              <p className="text-lg font-bold tabular-nums">{ptCurrency.format(totals.expense)}</p>
+              <p className="text-lg font-bold tabular-nums">{ptCurrency.format(totals.realizedExpense)}</p>
               <p className="mt-1 text-xs text-muted-foreground">Previsto: {ptCurrency.format(quickSummary.predictedExpense)}</p>
             </div>
             <div className="rounded-lg border border-border bg-secondary/30 p-3">
