@@ -30,13 +30,30 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "@/components/ui/sonner";
 import { useAuth } from "@/contexts/AuthContext";
 import { useEnablePush } from "@/hooks/useEnablePush";
+import { useNotificationPreferences, type NotificationPrefs } from "@/hooks/useNotificationPreferences";
 import { useFamily } from "@/contexts/FamilyContext";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
+
+// Categorias de notificação (mapeiam kinds na Edge Function generate-notifications).
+const NOTIF_CATEGORIES: { key: keyof NotificationPrefs; label: string; hint: string }[] = [
+  { key: "cat_compromissos", label: "Compromissos", hint: "Do dia e resumo da semana" },
+  { key: "cat_atrasados", label: "Atrasados", hint: "Contas e dívidas vencidas" },
+  { key: "cat_fatura", label: "Cartão", hint: "Fecha, vence e limite alto" },
+  { key: "cat_orcamento", label: "Orçamento", hint: "80% e estourado" },
+  { key: "cat_saldo", label: "Saldo e mês no vermelho", hint: "Conta negativa e caixa projetado negativo" },
+  { key: "cat_metas", label: "Metas", hint: "Marcos de 50/90/100%" },
+  { key: "cat_investimentos", label: "Investimentos", hint: "Variação de ±5%" },
+  { key: "cat_recorrencias", label: "Recorrências", hint: "Novas ocorrências geradas" },
+  { key: "cat_resumos", label: "Resumos", hint: "Fechamento mensal e semanal" },
+];
+const NOTIF_HOURS = Array.from({ length: 24 }, (_, h) => h);
+const pad2h = (h: number) => String(h).padStart(2, "0");
 
 type SettingsTab = "profile" | "accounts" | "categories" | "family" | "preferences";
 type AccountType = "checking" | "savings" | "wallet" | "investment";
@@ -119,6 +136,7 @@ const moneyValueToDigits = (value: number) => String(Math.round(value * 100));
 const SettingsPage = () => {
   const { user, profile, refreshProfile } = useAuth();
   const { status: pushStatus, enable: enablePush, disable: disablePush } = useEnablePush(user?.id);
+  const { prefs: notifPrefs, update: updateNotifPrefs } = useNotificationPreferences(user?.id);
   const { family } = useFamily();
   const navigate = useNavigate();
 
@@ -745,6 +763,55 @@ const SettingsPage = () => {
                         <Button size="sm" onClick={() => void enablePush()}>Ativar</Button>
                       ) : null}
                     </div>
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  <div>
+                    <Label>O que notificar</Label>
+                    <p className="mt-0.5 text-xs text-muted-foreground">Vale para o app e para o push do dispositivo.</p>
+                  </div>
+                  <div className="divide-y divide-border rounded-lg border border-border bg-secondary/20">
+                    {NOTIF_CATEGORIES.map((c) => (
+                      <div key={c.key} className="flex items-center justify-between gap-3 px-3 py-2.5">
+                        <div className="min-w-0">
+                          <p className="text-sm text-foreground">{c.label}</p>
+                          <p className="text-xs text-muted-foreground">{c.hint}</p>
+                        </div>
+                        <Switch
+                          checked={Boolean(notifPrefs[c.key])}
+                          onCheckedChange={(v) => void updateNotifPrefs({ [c.key]: v } as Partial<NotificationPrefs>)}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Horário de silêncio</Label>
+                  <p className="text-xs text-muted-foreground">Nesse intervalo as notificações ainda aparecem no app, mas o push não vibra o celular.</p>
+                  <div className="flex items-center gap-2">
+                    <Select
+                      value={notifPrefs.quiet_start === null ? "off" : String(notifPrefs.quiet_start)}
+                      onValueChange={(v) => void updateNotifPrefs(v === "off" ? { quiet_start: null, quiet_end: null } : { quiet_start: Number(v), quiet_end: notifPrefs.quiet_end ?? 7 })}
+                    >
+                      <SelectTrigger className="w-[140px]"><SelectValue /></SelectTrigger>
+                      <SelectContent className="max-h-[260px]">
+                        <SelectItem value="off">Desligado</SelectItem>
+                        {NOTIF_HOURS.map((h) => <SelectItem key={h} value={String(h)}>{pad2h(h)}:00</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                    <span className="text-sm text-muted-foreground">até</span>
+                    <Select
+                      value={notifPrefs.quiet_end === null ? "" : String(notifPrefs.quiet_end)}
+                      onValueChange={(v) => void updateNotifPrefs({ quiet_end: Number(v) })}
+                      disabled={notifPrefs.quiet_start === null}
+                    >
+                      <SelectTrigger className="w-[140px]"><SelectValue placeholder="—" /></SelectTrigger>
+                      <SelectContent className="max-h-[260px]">
+                        {NOTIF_HOURS.map((h) => <SelectItem key={h} value={String(h)}>{pad2h(h)}:00</SelectItem>)}
+                      </SelectContent>
+                    </Select>
                   </div>
                 </div>
               </CardContent>
