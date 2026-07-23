@@ -85,7 +85,8 @@ export const SchedulePlannedDialog = ({ open, item, onClose, onScheduled }: Prop
     if (item.kind === "investment") {
       const result = await schedulePlannedInvestment(item, date, { familyId: family?.id, userId: user?.id, investmentType });
       setSaving(false);
-      if (!result.ok) { toast.error(result.message); return; }
+      // Cast: com strict:false o TS não estreita a união discriminada por `ok`.
+      if (!result.ok) { toast.error((result as { message: string }).message); return; }
       toast.success("Agendado!");
       onScheduled();
       onClose();
@@ -95,7 +96,8 @@ export const SchedulePlannedDialog = ({ open, item, onClose, onScheduled }: Prop
     if (!isInstallment) {
       const result = await schedulePlannedTransaction(item, date, { familyId: family?.id, userId: user?.id, accountIdOverride: accountId || null });
       setSaving(false);
-      if (!result.ok) { toast.error(result.message); return; }
+      // Cast: com strict:false o TS não estreita a união discriminada por `ok`.
+      if (!result.ok) { toast.error((result as { message: string }).message); return; }
       toast.success("Agendado! Aparece como pendente nessa data.");
       onScheduled();
       onClose();

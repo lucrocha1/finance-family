@@ -16,8 +16,6 @@ import {
 import {
   Area,
   AreaChart,
-  Bar,
-  BarChart,
   CartesianGrid,
   Cell,
   Pie,
@@ -50,6 +48,7 @@ type TransactionRow = {
   type: "income" | "expense" | string;
   status: "paid" | "pending" | string | null;
   date: string;
+  description?: string | null;
   is_installment: boolean | null;
   is_recurring: boolean | null;
   categories?:
@@ -88,7 +87,6 @@ type ScheduledPaymentRow = {
 };
 
 const ptCurrency = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
-const weekdayFormatter = new Intl.DateTimeFormat("pt-BR", { weekday: "long" });
 
 const toISODate = (date: Date) => {
   const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
@@ -98,21 +96,6 @@ const startOfMonth = (base: Date) => new Date(base.getFullYear(), base.getMonth(
 const endOfMonth = (base: Date) => new Date(base.getFullYear(), base.getMonth() + 1, 0);
 const formatMonthYear = (date: Date) => date.toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
 const capitalize = (value: string) => value.charAt(0).toUpperCase() + value.slice(1);
-const startOfWeekMonday = (base: Date) => {
-  const copy = new Date(base);
-  const day = copy.getDay();
-  const diff = day === 0 ? -6 : 1 - day;
-  copy.setDate(copy.getDate() + diff);
-  copy.setHours(0, 0, 0, 0);
-  return copy;
-};
-const endOfWeekSunday = (base: Date) => {
-  const start = startOfWeekMonday(base);
-  const end = new Date(start);
-  end.setDate(start.getDate() + 6);
-  end.setHours(23, 59, 59, 999);
-  return end;
-};
 
 const formatCompactBRL = (value: number) => {
   if (Math.abs(value) >= 1_000_000) return `R$ ${(value / 1_000_000).toFixed(1).replace(".", ",")} mi`;
@@ -181,7 +164,6 @@ const DashboardPage = () => {
   // Período / gráfico de Fluxo de Caixa (mês visualizado).
   const [activeDebts, setActiveDebts] = useState<(DebtForProjection & { due_date: string })[]>([]);
   const [scheduledMonth, setScheduledMonth] = useState<ScheduledPaymentRow[]>([]);
-  const [scheduledWeek, setScheduledWeek] = useState<ScheduledPaymentRow[]>([]);
 
   const [categoriesTab, setCategoriesTab] = useState<"paid" | "pending">("paid");
   const [incomeTab, setIncomeTab] = useState<"paid" | "pending">("paid");
@@ -191,8 +173,6 @@ const DashboardPage = () => {
   const monthEnd = useMemo(() => endOfMonth(selectedMonth), [selectedMonth]);
   const prevMonthStart = useMemo(() => startOfMonth(new Date(selectedMonth.getFullYear(), selectedMonth.getMonth() - 1, 1)), [selectedMonth]);
   const prevMonthEnd = useMemo(() => endOfMonth(new Date(selectedMonth.getFullYear(), selectedMonth.getMonth() - 1, 1)), [selectedMonth]);
-  const weekStart = useMemo(() => startOfWeekMonday(new Date()), []);
-  const weekEnd = useMemo(() => endOfWeekSunday(new Date()), []);
 
   // Garante que recorrências estejam materializadas até o mês visualizado.
   // Quando o usuário navega pra meses distantes, o hook estende o horizonte
@@ -212,7 +192,6 @@ const DashboardPage = () => {
       setCumulativePendingTxs([]);
       setActiveDebts([]);
       setScheduledMonth([]);
-      setScheduledWeek([]);
       return;
     }
 
@@ -228,33 +207,28 @@ const DashboardPage = () => {
       // Fluxo do Período (que olha o mês todo) E a janela cumulativa hoje→monthEnd
       // pra projeção (que pode ir além do mês visualizado quando navega pra futuro).
       const debtStartIso = toISODate(monthStart < today ? monthStart : today);
-      const [txCurrent, txPrev, accountsRes, cardsRes, schedMonthRes, schedWeekRes, cardCommitRes, cardTxRes, cumulativePendingRes, activeDebtsRes] = await Promise.all([
+      // Sem filtro de .eq("family_id"): a RLS (user_id = auth.uid()) já isola por
+      // usuário; filtrar family_id escondia linhas cujo family_id ficou defasado
+      // (troca/entrada de família), fazendo o Dashboard divergir de
+      // Reports/Transactions/Cards/Schedule que já removeram esse filtro.
+      const [txCurrent, txPrev, accountsRes, cardsRes, schedMonthRes, cardCommitRes, cardTxRes, cumulativePendingRes, activeDebtsRes] = await Promise.all([
         supabase
           .from("transactions")
-          .select("id, family_id, user_id, card_id, category_id, amount, type, status, date, is_installment, is_recurring, categories ( id, name, icon, color )")
-          .eq("family_id", family.id)
+          .select("id, family_id, user_id, card_id, category_id, amount, type, status, date, description, is_installment, is_recurring, categories ( id, name, icon, color )")
           .gte("date", toISODate(monthStart))
           .lte("date", toISODate(monthEnd)),
         supabase
           .from("transactions")
           .select("id, family_id, user_id, card_id, category_id, amount, type, status, date, is_installment, is_recurring")
-          .eq("family_id", family.id)
           .gte("date", toISODate(prevMonthStart))
           .lte("date", toISODate(prevMonthEnd)),
-        supabase.from("accounts").select("id, family_id, balance").eq("family_id", family.id),
-        supabase.from("cards").select("id, family_id, name, brand, credit_limit, closing_day, due_day").eq("family_id", family.id),
+        supabase.from("accounts").select("id, family_id, balance"),
+        supabase.from("cards").select("id, family_id, name, brand, credit_limit, closing_day, due_day"),
         supabase
           .from("scheduled_payments")
           .select("id, family_id, due_date, amount, type, is_paid")
-          .eq("family_id", family.id)
           .gte("due_date", toISODate(monthStart))
           .lte("due_date", toISODate(monthEnd)),
-        supabase
-          .from("scheduled_payments")
-          .select("id, family_id, due_date, amount, type, is_paid")
-          .eq("family_id", family.id)
-          .gte("due_date", toISODate(weekStart))
-          .lte("due_date", toISODate(weekEnd)),
         // Compromissos do cartão = todas as despesas com cartão ainda não pagas.
         // Inclui date, status, is_recurring e recurrence_parent_id pra
         // computeSpentByCard distinguir parcelas (somam todas as futuras)
@@ -262,7 +236,6 @@ const DashboardPage = () => {
         supabase
           .from("transactions")
           .select("card_id, amount, type, status, date, is_recurring, recurrence_parent_id, is_installment")
-          .eq("family_id", family.id)
           .eq("type", "expense")
           .neq("status", "paid")
           .not("card_id", "is", null),
@@ -273,7 +246,6 @@ const DashboardPage = () => {
         supabase
           .from("transactions")
           .select("card_id, amount, date, status, category_id, is_installment, is_recurring, recurrence_parent_id, categories(id, name, color, icon)")
-          .eq("family_id", family.id)
           .eq("type", "expense")
           .not("card_id", "is", null)
           .gte("date", toISODate(new Date(Math.min(
@@ -289,7 +261,6 @@ const DashboardPage = () => {
         supabase
           .from("transactions")
           .select("id, card_id, amount, type, status, date")
-          .eq("family_id", family.id)
           .neq("status", "paid")
           .is("card_id", null)
           .gte("date", todayIso)
@@ -301,7 +272,6 @@ const DashboardPage = () => {
         supabase
           .from("debts")
           .select("status, direction, due_date, total_with_interest, original_amount, amount_paid, has_installments, installment_amount")
-          .eq("family_id", family.id)
           .eq("status", "active")
           .not("due_date", "is", null)
           .gte("due_date", debtStartIso)
@@ -317,12 +287,11 @@ const DashboardPage = () => {
       setCumulativePendingTxs((cumulativePendingRes.data as Pick<TransactionRow, "id" | "card_id" | "amount" | "type" | "status" | "date">[] | null) ?? []);
       setActiveDebts((activeDebtsRes.data as (DebtForProjection & { due_date: string })[] | null) ?? []);
       setScheduledMonth((schedMonthRes.data as ScheduledPaymentRow[] | null) ?? []);
-      setScheduledWeek((schedWeekRes.data as ScheduledPaymentRow[] | null) ?? []);
       setLoading(false);
     };
 
     void loadDashboard();
-  }, [family?.id, monthEnd, monthStart, prevMonthEnd, prevMonthStart, weekEnd, weekStart, recurrenceVersion]);
+  }, [family?.id, monthEnd, monthStart, prevMonthEnd, prevMonthStart, recurrenceVersion]);
 
   // Transações de cartão cuja fatura VENCE no mês visualizado, separadas
   // por status. Usadas para popular o donut "A Pagar" (pending) e "Pago"
@@ -512,8 +481,11 @@ const DashboardPage = () => {
         const window = getOpenInvoiceWindow(Number(card.closing_day), Number(card.due_day), today);
         const startIso = toISODate(window.invoiceStart);
         const endIso = toISODate(window.invoiceEnd);
+        // Só compras ainda não pagas: se parte da fatura já foi quitada, o total
+        // "a pagar" reflete o restante (alinha com o widget da Semana, que
+        // também ignora o que já foi pago).
         const total = cardTransactions
-          .filter((tx) => tx.card_id === card.id && tx.date >= startIso && tx.date <= endIso)
+          .filter((tx) => tx.card_id === card.id && tx.date >= startIso && tx.date <= endIso && tx.status !== "paid")
           .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
         const daysToClose = daysBetween(today, window.invoiceEnd);
         const daysToDue = daysBetween(today, window.dueDate);
@@ -533,16 +505,6 @@ const DashboardPage = () => {
       .sort((a, b) => a.dueDate.getTime() - b.dueDate.getTime());
   }, [cardTransactions, cards]);
 
-  const busiestDay = useMemo(() => {
-    if (!scheduledWeek.length) return null;
-    const map = new Map<string, number>();
-    scheduledWeek.forEach((item) => {
-      const dayName = capitalize(weekdayFormatter.format(new Date(`${item.due_date}T00:00:00`)));
-      map.set(dayName, (map.get(dayName) ?? 0) + 1);
-    });
-    return [...map.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
-  }, [scheduledWeek]);
-
   const donutData = useMemo(() => {
     const grouped = new Map<string, { name: string; value: number; color: string }>();
     const addTx = (tx: { amount: number; category_id?: string | null; categories?: TransactionRow["categories"] }) => {
@@ -556,22 +518,19 @@ const DashboardPage = () => {
       else grouped.set(key, { name, value, color });
     };
 
-    // Despesas não-cartão do mês visível.
+    // Todas as despesas do mês visualizado, agrupadas por categoria e contadas
+    // pela DATA DA COMPRA — mesma convenção de Relatórios/Orçamento (decisão
+    // "por proposito"): tanto não-cartão quanto compras no cartão entram pelo
+    // mês em que a compra ocorreu, não pelo vencimento da fatura (isso fica só
+    // pra projeção de caixa). O split Pago/A Pagar continua por status: paid =
+    // lançamento/fatura quitada; pending (ou null) = em aberto.
     transactions
-      .filter((tx) => tx.type === "expense" && !tx.card_id)
-      // Exclui o lançamento "Pagamento Fatura": as compras do cartão já entram
-      // pelo cardTxsDueInMonth (com suas categorias), então contar o pagamento
-      // também dobraria o valor no donut (F61).
+      .filter((tx) => tx.type === "expense")
+      // Exclui o lançamento não-cartão "Pagamento Fatura": as compras do cartão
+      // já entram por suas categorias, então contar o pagamento também dobraria
+      // o valor (F61). Agora funciona de fato — description passou a ser buscada
+      // no SELECT (antes o filtro era inerte e a fatura contava em dobro).
       .filter((tx) => !(tx.description ?? "").startsWith("Pagamento Fatura"))
-      .filter((tx) => (categoriesTab === "paid" ? tx.status === "paid" : tx.status === "pending"))
-      .forEach(addTx);
-
-    // Despesas de cartão cuja fatura VENCE no mês visualizado, agrupadas
-    // pelas categorias das compras (não pelo cartão). Pago/A Pagar é
-    // determinado pelo status: paid (fatura quitada) vs pending (fatura
-    // ainda aberta). Isso garante que faturas a vencer apareçam em
-    // "A Pagar" e faturas pagas via "Pagar Fatura" apareçam em "Pago".
-    cardTxsDueInMonth
       .filter((tx) => (categoriesTab === "paid" ? tx.status === "paid" : tx.status !== "paid"))
       .forEach(addTx);
 
@@ -586,7 +545,7 @@ const DashboardPage = () => {
       rows.push({ name: `Outros (${rest.length})`, value: restValue, color: "#6b7280", percentage: total > 0 ? (restValue / total) * 100 : 0 });
     }
     return { rows, total };
-  }, [cardTxsDueInMonth, categoriesTab, transactions]);
+  }, [categoriesTab, transactions]);
 
   const incomeDonutData = useMemo(() => {
     const grouped = new Map<string, { name: string; value: number; color: string }>();
@@ -794,8 +753,8 @@ const DashboardPage = () => {
 
             <div className="w-full min-w-0 space-y-2">
               {donutData.rows.length ? (
-                donutData.rows.map((item) => (
-                  <div key={item.name} className="flex items-center justify-between gap-3 rounded-lg border border-border bg-secondary/20 px-3 py-1.5">
+                donutData.rows.map((item, idx) => (
+                  <div key={`${item.name}-${idx}`} className="flex items-center justify-between gap-3 rounded-lg border border-border bg-secondary/20 px-3 py-1.5">
                     <div className="flex min-w-0 flex-1 items-center gap-2">
                       <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: item.color }} />
                       <span className="truncate text-sm text-foreground">{item.name}</span>
@@ -848,8 +807,8 @@ const DashboardPage = () => {
 
             <div className="w-full min-w-0 space-y-2">
               {incomeDonutData.rows.length ? (
-                incomeDonutData.rows.map((item) => (
-                  <div key={item.name} className="flex items-center justify-between gap-3 rounded-lg border border-border bg-secondary/20 px-3 py-1.5">
+                incomeDonutData.rows.map((item, idx) => (
+                  <div key={`${item.name}-${idx}`} className="flex items-center justify-between gap-3 rounded-lg border border-border bg-secondary/20 px-3 py-1.5">
                     <div className="flex min-w-0 flex-1 items-center gap-2">
                       <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: item.color }} />
                       <span className="truncate text-sm text-foreground">{item.name}</span>

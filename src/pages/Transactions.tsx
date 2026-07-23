@@ -478,7 +478,7 @@ const TransactionsPage = () => {
     setInstallments(tx.installment_total ?? 2);
     setIsRecurring(Boolean(tx.is_recurring));
     setRecurrenceType(((tx.recurrence_type as RecurrenceType) || "monthly") as RecurrenceType);
-    setTags(Array.isArray((tx as { tags?: string[] }).tags) ? (tx as { tags: string[] }).tags : []);
+    setTags(Array.isArray((tx as { tags?: string[] }).tags) ? (tx as { tags?: string[] }).tags ?? [] : []);
     setNotes(tx.notes ?? "");
     setOpen(true);
   };
@@ -838,7 +838,7 @@ const TransactionsPage = () => {
         toast.error("Não foi possível excluir a recorrência vinculada");
         return;
       }
-      invalidateRecurrenceHorizon();
+      if (family?.id && user?.id) invalidateRecurrenceHorizon(family.id, user.id);
       setDeleteOpen(false);
       setDeleteTarget(null);
       if (editing?.id === deleteTarget.id) {
@@ -885,7 +885,7 @@ const TransactionsPage = () => {
     if (isRecurringTarget && recurrenceRootId && mode === "remaining") {
       const prevDay = toISODate(new Date(new Date(`${deleteTarget.date}T00:00:00`).getTime() - 86400000));
       await supabase.from("transactions").update({ recurrence_end_date: prevDay }).eq("id", recurrenceRootId);
-      invalidateRecurrenceHorizon();
+      if (family?.id && user?.id) invalidateRecurrenceHorizon(family.id, user.id);
     }
 
     setDeleteOpen(false);
@@ -918,7 +918,7 @@ const TransactionsPage = () => {
       .or(`id.eq.${recurrenceRoot},recurrence_parent_id.eq.${recurrenceRoot}`)
       .gt("date", todayIso)
       .neq("status", "paid");
-    invalidateRecurrenceHorizon();
+    if (family?.id && user?.id) invalidateRecurrenceHorizon(family.id, user.id);
     setOpen(false);
     resetForm();
     await loadData();
