@@ -168,10 +168,13 @@ const DebtDetailPage = () => {
 
     setLoading(true);
 
+    // Sem .eq("family_id"): a RLS (user_id = auth.uid()) já isola por usuário;
+    // filtrar family_id escondia linhas com family_id defasado, divergindo das
+    // demais telas. Os filtros por id/debt_id continuam.
     const [debtRes, paymentsRes, accountsRes] = await Promise.all([
-      supabase.from("debts").select("*").eq("family_id", family.id).eq("id", id).maybeSingle(),
-      supabase.from("debt_payments").select("*").eq("family_id", family.id).eq("debt_id", id).order("date", { ascending: false }),
-      supabase.from("accounts").select("id, name").eq("family_id", family.id).order("name", { ascending: true }),
+      supabase.from("debts").select("*").eq("id", id).maybeSingle(),
+      supabase.from("debt_payments").select("*").eq("debt_id", id).order("date", { ascending: false }),
+      supabase.from("accounts").select("id, name").order("name", { ascending: true }),
     ]);
     setAccounts((accountsRes.data as Array<{ id: string; name: string }> | null) ?? []);
 

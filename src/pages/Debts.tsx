@@ -231,7 +231,10 @@ const DebtsPage = () => {
     }
 
     setLoading(true);
-    const { data, error } = await supabase.from("debts").select("*").eq("family_id", family.id).order("created_at", { ascending: false });
+    // Sem .eq("family_id"): a RLS (user_id = auth.uid()) já isola; filtrar
+    // family_id escondia dívidas com family_id defasado que o Dashboard/Agenda
+    // (que não filtram) mostram — divergência entre telas.
+    const { data, error } = await supabase.from("debts").select("*").order("created_at", { ascending: false });
 
     if (error) {
       toast.error("Erro ao carregar dívidas");
