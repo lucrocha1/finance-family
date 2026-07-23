@@ -434,6 +434,27 @@ const CardInvoiceDetailPage = () => {
     await loadData();
   };
 
+  // Desfaz o pagamento da fatura (ATÔMICO via RPC): reabre as compras do ciclo e
+  // remove o lançamento "Pagamento Fatura", creditando a conta de volta.
+  const undoPayment = async () => {
+    if (!card) return;
+    setPaying(true);
+    const cycle = getCycleWindow(Number(card.closing_day || 1), selectedInvoiceMonth);
+    const { error } = await supabase.rpc("undo_card_invoice_payment", {
+      p_card_id: card.id,
+      p_cycle_start: cycle.start,
+      p_cycle_end: cycle.end,
+      p_payment_description: `Pagamento Fatura — ${card.name} (${formatMonthYear(selectedInvoiceMonth)})`,
+    });
+    setPaying(false);
+    if (error) {
+      toast.error(error.message || "Não foi possível desfazer o pagamento");
+      return;
+    }
+    toast.success("Pagamento desfeito — fatura reaberta");
+    await loadData();
+  };
+
   if (loading) {
     return <div className="rounded-xl border border-border bg-card p-8 text-sm text-muted-foreground">Carregando fatura...</div>;
   }
@@ -479,6 +500,11 @@ const CardInvoiceDetailPage = () => {
         {pendingTotal > 0 && (
           <Button onClick={openPayInvoice} className="ml-3 h-9 rounded-lg">
             Pagar Fatura
+          </Button>
+        )}
+        {pendingTotal <= 0 && transactions.length > 0 && (
+          <Button variant="outline" disabled={paying} onClick={() => void undoPayment()} className="ml-3 h-9 rounded-lg border-destructive/40 text-destructive hover:bg-destructive/10">
+            Desfazer pagamento
           </Button>
         )}
       </div>

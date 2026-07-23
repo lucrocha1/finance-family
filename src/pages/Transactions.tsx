@@ -827,6 +827,29 @@ const TransactionsPage = () => {
     }
     const isRecurringTarget = Boolean(deleteTarget.is_recurring) || Boolean(deleteTarget.recurrence_parent_id);
     const recurrenceRootId = deleteTarget.recurrence_parent_id ?? (deleteTarget.is_recurring ? deleteTarget.id : null);
+
+    // Recorrência LINKED (espelhada em outro membro): excluir a série (all/
+    // remaining) precisa limpar as DUAS séries. A RLS impede o client de apagar
+    // as linhas do outro membro, então delegamos na RPC delete_linked_transaction,
+    // que encerra os dois pais e apaga as ocorrencias nos dois lados (F19).
+    if (deleteTarget.linked_pair_id && isRecurringTarget && (mode === "all" || mode === "remaining")) {
+      const { error } = await supabase.rpc("delete_linked_transaction", { p_id: deleteTarget.id, p_mode: mode });
+      if (error) {
+        toast.error("Não foi possível excluir a recorrência vinculada");
+        return;
+      }
+      invalidateRecurrenceHorizon();
+      setDeleteOpen(false);
+      setDeleteTarget(null);
+      if (editing?.id === deleteTarget.id) {
+        setOpen(false);
+        resetForm();
+      }
+      await loadData();
+      toast.success("Recorrência excluída nos dois membros");
+      return;
+    }
+
     let query = supabase.from("transactions").delete();
 
     if (mode === "one") {
