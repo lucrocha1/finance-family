@@ -1,114 +1,127 @@
 import { useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Eye, EyeOff } from "lucide-react";
+import { ArrowRight, Loader2, Lock, Mail } from "lucide-react";
 
+import { AuthInput } from "@/components/auth/AuthInput";
 import { AuthShell } from "@/components/auth/AuthShell";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { toast } from "@/components/ui/sonner";
 import { supabase, isSupabaseConfigured } from "@/integrations/supabase/client";
+
+const REMEMBER_KEY = "ff_login_email";
 
 const LoginPage = () => {
   const navigate = useNavigate();
-  const [email, setEmail] = useState("");
+  const [email, setEmail] = useState(() => localStorage.getItem(REMEMBER_KEY) ?? "");
   const [password, setPassword] = useState("");
-  const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
+  const [rememberMe, setRememberMe] = useState(() => Boolean(localStorage.getItem(REMEMBER_KEY)));
+  const [sendingReset, setSendingReset] = useState(false);
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-
     setErrorMessage("");
     setSubmitting(true);
 
-    const { error } = await supabase.auth.signInWithPassword({
-      email: email.trim(),
-      password,
-    });
-
+    const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
     setSubmitting(false);
 
     if (error) {
-      setErrorMessage(error.message);
+      setErrorMessage(error.message === "Invalid login credentials" ? "E-mail ou senha incorretos." : error.message);
       return;
     }
+
+    if (rememberMe) localStorage.setItem(REMEMBER_KEY, email.trim());
+    else localStorage.removeItem(REMEMBER_KEY);
 
     navigate("/dashboard", { replace: true });
   };
 
+  const handleForgotPassword = async () => {
+    if (!email.trim()) {
+      toast.error("Digite seu e-mail primeiro pra receber o link.");
+      return;
+    }
+    setSendingReset(true);
+    await supabase.auth.resetPasswordForEmail(email.trim(), { redirectTo: `${window.location.origin}/login` });
+    setSendingReset(false);
+    toast.success("Se houver conta com esse e-mail, enviamos um link de redefinição.");
+  };
+
   return (
-    <AuthShell>
-      <div className="space-y-6">
-        <div className="space-y-2 text-center">
-          <p className="text-3xl font-bold text-primary">💰 Finance Family</p>
-          <p className="text-sm text-muted-foreground">Gerencie suas finanças em família</p>
+    <AuthShell title="Bem-vindo de volta" subtitle="Entre para continuar no Finance Family">
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <AuthInput
+          icon={Mail}
+          type="email"
+          aria-label="E-mail"
+          autoComplete="email"
+          inputMode="email"
+          placeholder="Seu e-mail"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          required
+        />
+        <AuthInput
+          icon={Lock}
+          isPassword
+          aria-label="Senha"
+          autoComplete="current-password"
+          placeholder="Sua senha"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          required
+        />
+
+        <div className="flex items-center justify-between pt-0.5">
+          <label className="flex cursor-pointer select-none items-center gap-2 text-sm text-white/60">
+            <input
+              type="checkbox"
+              checked={rememberMe}
+              onChange={() => setRememberMe((v) => !v)}
+              className="h-4 w-4 rounded border-white/20 bg-white/5 accent-primary"
+            />
+            Lembrar de mim
+          </label>
+          <button
+            type="button"
+            onClick={() => void handleForgotPassword()}
+            disabled={sendingReset}
+            className="text-sm text-white/60 transition-colors hover:text-primary disabled:opacity-60"
+          >
+            {sendingReset ? "Enviando..." : "Esqueceu a senha?"}
+          </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="space-y-2">
-            <label htmlFor="email" className="text-xs font-semibold uppercase tracking-normal text-muted-foreground">
-              E-mail
-            </label>
-            <Input
-              id="email"
-              type="email"
-              autoComplete="email"
-              placeholder="seu@email.com"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              className="h-11 rounded-lg border-border bg-input text-foreground placeholder:text-muted-foreground focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-0"
-              required
-            />
-          </div>
+        {!isSupabaseConfigured && (
+          <p className="text-sm text-destructive">Configure VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY para autenticação.</p>
+        )}
+        {errorMessage && (
+          <p className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">{errorMessage}</p>
+        )}
 
-          <div className="space-y-2">
-            <label htmlFor="password" className="text-xs font-semibold uppercase tracking-normal text-muted-foreground">
-              Senha
-            </label>
-            <div className="relative">
-              <Input
-                id="password"
-                type={showPassword ? "text" : "password"}
-                autoComplete="current-password"
-                placeholder="••••••••"
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                className="h-11 rounded-lg border-border bg-input pr-11 text-foreground placeholder:text-muted-foreground focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-0"
-                required
-              />
-              <button
-                type="button"
-                onClick={() => setShowPassword((prev) => !prev)}
-                className="absolute inset-y-0 right-0 flex w-11 items-center justify-center text-muted-foreground hover:text-foreground"
-                aria-label={showPassword ? "Ocultar senha" : "Mostrar senha"}
-              >
-                {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-              </button>
-            </div>
-          </div>
-
-          {!isSupabaseConfigured && (
-            <p className="text-sm text-destructive">Configure VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY para autenticação.</p>
+        <button
+          type="submit"
+          disabled={submitting || !isSupabaseConfigured}
+          className="group/btn relative mt-1 flex h-12 w-full items-center justify-center gap-1.5 overflow-hidden rounded-xl bg-primary text-[15px] font-semibold text-primary-foreground shadow-[0_8px_30px_-8px_hsl(142_70%_46%/0.7)] transition-all duration-200 hover:bg-primary-hover disabled:opacity-70"
+        >
+          {submitting ? (
+            <Loader2 className="h-5 w-5 animate-spin" />
+          ) : (
+            <>
+              Entrar
+              <ArrowRight className="h-4 w-4 transition-transform duration-200 group-hover/btn:translate-x-1" />
+            </>
           )}
+        </button>
+      </form>
 
-          {errorMessage && <p className="text-sm text-destructive">{errorMessage}</p>}
-
-          <Button
-            type="submit"
-            className="h-11 w-full rounded-lg bg-primary font-semibold text-primary-foreground hover:bg-primary-hover"
-            disabled={submitting || !isSupabaseConfigured}
-          >
-            {submitting ? "Entrando..." : "Entrar"}
-          </Button>
-        </form>
-
-        <p className="text-center text-sm text-muted-foreground">
-          Não tem conta?{" "}
-          <Link to="/register" className="font-semibold text-primary hover:text-accent-hover">
-            Cadastre-se
-          </Link>
-        </p>
-      </div>
+      <p className="mt-6 text-center text-sm text-white/50">
+        Não tem conta?{" "}
+        <Link to="/register" className="font-semibold text-primary transition-opacity hover:opacity-80">
+          Cadastre-se
+        </Link>
+      </p>
     </AuthShell>
   );
 };
