@@ -1,13 +1,10 @@
-// Generate-recurrences edge function — STANDBY/OPCIONAL.
+// Generate-recurrences edge function.
 //
-// O cliente roda a geração via src/lib/generateRecurrences.ts (com horizonte
-// dinâmico baseado na navegação do usuário). Esta função é mantida pra
-// permitir agendamento via pg_cron caso queira garantir geração mesmo sem
-// nenhum cliente abrir o app. Lookahead deve ficar alinhado com o cliente
-// (90 dias) pra evitar divergências.
-//
-// Schedule via pg_cron uma vez por dia ou invoque manualmente:
-//   supabase functions invoke generate-recurrences
+// Roda a geração de ocorrências recorrentes no servidor (todos os usuários),
+// agendada via pg_cron (job finance-family-recurrences, 06:00 UTC), garantindo
+// materialização mesmo sem ninguém abrir o app. O cliente também gera (via
+// src/lib/generateRecurrences.ts, horizonte dinâmico); ambos são idempotentes.
+// Lookahead alinhado com o cliente: 90 dias.
 
 // deno-lint-ignore-file no-explicit-any
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
