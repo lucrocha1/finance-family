@@ -190,23 +190,27 @@ const ReportsPage = () => {
 
   const trendByCategory = useMemo(() => {
     const top5 = categoryExpenses.items.slice(0, 5);
+    const topIds = new Set(top5.map((c) => c.id));
+    // "Outros" agrega as categorias fora do top-5, pra o gráfico não esconder
+    // gasto nem divergir do total das outras seções.
+    const hasOthers = categoryExpenses.items.length > 5;
+    const keys = hasOthers
+      ? [...top5, { id: "__others__", category: "Outros", color: "hsl(var(--muted-foreground))", value: 0, rank: 6, percent: 0 }]
+      : top5;
     const monthList = monthly.map((m) => m.key);
+    const catIdOf = (tx: TxRow) => tx.category_id || asSingle(tx.categories)?.id || "none";
 
     return {
-      keys: top5,
+      keys,
       data: monthList.map((month) => {
         const base: Record<string, string | number> = { label: monthLabel(month), month };
+        const monthExp = realizedRows.filter((tx) => tx.type === "expense" && !isInvoicePayment(tx) && monthKey(tx.date) === month);
         top5.forEach((cat) => {
-          const total = realizedRows
-            .filter((tx) => tx.type === "expense" && !isInvoicePayment(tx) && monthKey(tx.date) === month)
-            .filter((tx) => {
-              const c = asSingle(tx.categories);
-              const id = tx.category_id || c?.id || "none";
-              return id === cat.id;
-            })
-            .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
-          base[cat.id] = total;
+          base[cat.id] = monthExp.filter((tx) => catIdOf(tx) === cat.id).reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
         });
+        if (hasOthers) {
+          base["__others__"] = monthExp.filter((tx) => !topIds.has(catIdOf(tx))).reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+        }
         return base;
       }),
     };

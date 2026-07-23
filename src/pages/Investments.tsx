@@ -574,11 +574,23 @@ const InvestmentsPage = () => {
       ) : filteredAndSorted.length === 0 ? (
         <div className="rounded-xl border border-dashed border-border bg-secondary/20 p-10 text-center">
           <TrendingUp className="mx-auto h-14 w-14 text-[hsl(var(--placeholder-icon))]" />
-          <p className="mt-4 text-lg font-semibold text-foreground">Nenhum investimento cadastrado</p>
-          <p className="mt-1 text-sm text-muted-foreground">Comece a acompanhar seus investimentos</p>
-          <Button onClick={openCreate} className="mt-5 h-10 rounded-lg font-semibold">
-            + Novo Investimento
-          </Button>
+          {investments.length === 0 ? (
+            <>
+              <p className="mt-4 text-lg font-semibold text-foreground">Nenhum investimento cadastrado</p>
+              <p className="mt-1 text-sm text-muted-foreground">Comece a acompanhar seus investimentos</p>
+              <Button onClick={openCreate} className="mt-5 h-10 rounded-lg font-semibold">
+                + Novo Investimento
+              </Button>
+            </>
+          ) : (
+            <>
+              <p className="mt-4 text-lg font-semibold text-foreground">Nenhum investimento deste tipo</p>
+              <p className="mt-1 text-sm text-muted-foreground">Ajuste o filtro para ver os outros</p>
+              <Button variant="outline" onClick={() => setTypeFilter("all")} className="mt-5 h-10 rounded-lg font-semibold">
+                Limpar filtro
+              </Button>
+            </>
+          )}
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
