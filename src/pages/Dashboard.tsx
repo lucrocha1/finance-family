@@ -588,6 +588,21 @@ const DashboardPage = () => {
     return { rows, total };
   }, [incomeTab, transactions]);
 
+  // Movimento de CAIXA realizado do mês (não-cartão, pago) — INCLUI pagamentos de
+  // fatura, pois num gráfico de SALDO eles movem o caixa de verdade (diferente do
+  // "Fluxo do período", que mede GASTO e exclui o pagamento).
+  const realizedMonthNet = useMemo(
+    () =>
+      transactions
+        .filter((tx) => !tx.card_id && tx.status === "paid" && (tx.type === "income" || tx.type === "expense"))
+        .reduce((sum, tx) => sum + (tx.type === "income" ? Number(tx.amount || 0) : -Number(tx.amount || 0)), 0),
+    [transactions],
+  );
+  // Saldo no INÍCIO do mês = saldo atual − movimento realizado do mês. A linha do
+  // Fluxo de Caixa começa aqui (em vez do zero), então a aba Realizado termina no
+  // Saldo atual e a Projetada no Caixa Projetado — batendo com os cards de cima.
+  const flowOpening = totalBankBalance - realizedMonthNet;
+
   const flowData = useMemo(() => {
     const daysInMonth = monthEnd.getDate();
     const rows = Array.from({ length: daysInMonth }, (_, index) => ({ day: index + 1, change: 0, saldo: 0 }));
@@ -627,14 +642,18 @@ const DashboardPage = () => {
       });
     }
 
-    let running = 0;
+    // Começa no saldo do início do mês (não no zero): a linha vira o SALDO ao
+    // longo do mês, terminando no saldo atual (realizado) / projetado.
+    let running = flowOpening;
     return rows.map((row) => {
       running += row.change;
       return { ...row, saldo: running };
     });
-  }, [cardInvoiceProjections, flowTab, monthDebts, monthEnd, transactions]);
+  }, [cardInvoiceProjections, flowOpening, flowTab, monthDebts, monthEnd, transactions]);
 
   const flowLastValue = flowData[flowData.length - 1]?.saldo ?? 0;
+  // Movimento líquido do mês (variação), pra mostrar como contexto no card.
+  const flowMovement = flowLastValue - flowOpening;
 
   return (
     <div className="space-y-6">
@@ -844,6 +863,13 @@ const DashboardPage = () => {
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.5px] text-muted-foreground">Fluxo de Caixa</p>
                 <p className={cn("mt-2 text-3xl font-bold tabular-nums", flowLastValue >= 0 ? "text-success" : "text-destructive")}>{ptCurrency.format(flowLastValue)}</p>
+                <p className="mt-1 text-[11px] text-muted-foreground">
+                  {flowTab === "realized" ? "Saldo hoje" : "Saldo projetado"} ·{" "}
+                  <span className={cn("font-medium", flowMovement >= 0 ? "text-success" : "text-destructive")}>
+                    {flowMovement >= 0 ? "+" : ""}{ptCurrency.format(flowMovement)}
+                  </span>{" "}
+                  no mês
+                </p>
               </div>
               <div className="flex rounded-lg bg-secondary p-1">
                 <button type="button" onClick={() => setFlowTab("realized")} className={cn("rounded-md px-3 py-1 text-xs font-semibold", flowTab === "realized" ? "bg-primary text-primary-foreground" : "text-muted-foreground")}>Realizado</button>
