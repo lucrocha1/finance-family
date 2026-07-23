@@ -382,7 +382,9 @@ const CardInvoiceDetailPage = () => {
   const openPayInvoice = () => {
     if (!card || pendingTotal <= 0) return;
     setPayAccountId(accounts[0]?.id ?? "");
-    setPayDate(toISODate(dueDate));
+    // Data do pagamento = HOJE (o dia em que você está pagando), não o vencimento
+    // da fatura. Continua editável no dialog caso tenha pago em outro dia.
+    setPayDate(toISODate(new Date()));
     // Valor = total EM ABERTO. Pagamento parcial não é suportado (pagar libera o
     // limite de todo o ciclo), então usamos o pendente e não o invoiceTotal
     // (que incluiria compras já pagas) — F2/F9.
