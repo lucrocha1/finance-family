@@ -164,6 +164,7 @@ const TransactionsPage = () => {
   const [saving, setSaving] = useState(false);
   const [editing, setEditing] = useState<TransactionRow | null>(null);
   const [editAllInstallments, setEditAllInstallments] = useState(false);
+  const [editAllRecurrences, setEditAllRecurrences] = useState(false);
 
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<TransactionRow | null>(null);
@@ -431,6 +432,7 @@ const TransactionsPage = () => {
   const resetForm = () => {
     setEditing(null);
     setEditAllInstallments(false);
+    setEditAllRecurrences(false);
     setFormType("expense");
     setDescription("");
     setAmountDigits("");
@@ -628,6 +630,24 @@ const TransactionsPage = () => {
             status: base.status,
           })
           .eq("transfer_group_id", editing.transfer_group_id);
+        if (error) errorMessage = error.message;
+      } else if (editAllRecurrences && (editing.is_recurring || editing.recurrence_parent_id)) {
+        // "Editar todas as ocorrências": propaga valor/descrição/categoria/conta/
+        // cartão/notas/tags para a série inteira (pai + filhas). NÃO mexe em
+        // date (cada ocorrência tem a sua) nem em status (pagas continuam pagas).
+        const recurrenceRoot = editing.recurrence_parent_id ?? editing.id;
+        const { error } = await supabase
+          .from("transactions")
+          .update({
+            description: base.description,
+            amount: base.amount,
+            category_id: base.category_id,
+            account_id: base.account_id,
+            card_id: base.card_id,
+            notes: base.notes,
+            tags: base.tags,
+          })
+          .or(`id.eq.${recurrenceRoot},recurrence_parent_id.eq.${recurrenceRoot}`);
         if (error) errorMessage = error.message;
       } else {
         const { error } = await supabase
@@ -853,6 +873,33 @@ const TransactionsPage = () => {
     }
     await loadData();
     toast.success("Transação excluída");
+  };
+
+  // Encerra a recorrência: o pai para de gerar novas ocorrências
+  // (recurrence_end_date = hoje) e as futuras ainda não pagas são removidas.
+  const endRecurrence = async (tx: TransactionRow) => {
+    const recurrenceRoot = tx.recurrence_parent_id ?? (tx.is_recurring ? tx.id : null);
+    if (!recurrenceRoot) return;
+    const todayIso = toISODate(new Date());
+    const { error: endErr } = await supabase
+      .from("transactions")
+      .update({ recurrence_end_date: todayIso })
+      .eq("id", recurrenceRoot);
+    if (endErr) {
+      toast.error("Não foi possível encerrar a recorrência");
+      return;
+    }
+    await supabase
+      .from("transactions")
+      .delete()
+      .or(`id.eq.${recurrenceRoot},recurrence_parent_id.eq.${recurrenceRoot}`)
+      .gt("date", todayIso)
+      .neq("status", "paid");
+    invalidateRecurrenceHorizon();
+    setOpen(false);
+    resetForm();
+    await loadData();
+    toast.success("Recorrência encerrada — ocorrências futuras não serão mais geradas");
   };
 
   const markPaid = async (tx: TransactionRow) => {
@@ -1236,6 +1283,26 @@ const TransactionsPage = () => {
 
             {editing?.is_installment && editing.installment_current && editing.installment_total && (
               <div className="space-y-2 rounded-lg border border-border bg-secondary/40 p-3"><p className="text-sm text-foreground">Parcela {editing.installment_current} de {editing.installment_total}</p><div className="flex items-center justify-between"><Label className="text-sm text-foreground">Editar todas as parcelas?</Label><Switch checked={editAllInstallments} onCheckedChange={setEditAllInstallments} /></div></div>
+            )}
+
+            {editing && (editing.is_recurring || editing.recurrence_parent_id) && !editing.installment_group_id && (
+              <div className="space-y-3 rounded-lg border border-border bg-secondary/40 p-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <Label className="text-sm text-foreground">Editar todas as ocorrências?</Label>
+                    <p className="text-xs text-muted-foreground">Aplica valor/descrição/categoria/conta a toda a série (mantém as datas)</p>
+                  </div>
+                  <Switch checked={editAllRecurrences} onCheckedChange={setEditAllRecurrences} />
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full rounded-lg border-destructive/40 text-destructive hover:bg-destructive/10"
+                  onClick={() => editing && void endRecurrence(editing)}
+                >
+                  Encerrar recorrência (parar futuras)
+                </Button>
+              </div>
             )}
 
             <div className="space-y-2"><Label className="text-xs text-muted-foreground">Descrição</Label><Input value={description} onChange={(e) => setDescription(e.target.value.slice(0, 120))} placeholder="Ex: Supermercado, Salário, Aluguel..." className="h-[42px] rounded-lg border-border bg-secondary text-foreground" /></div>
