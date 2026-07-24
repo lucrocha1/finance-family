@@ -601,6 +601,10 @@ const GoalsPage = () => {
     }
 
     setGroupSaving(true);
+    // Rastreia o grupo criado NESTE save pra compensar (desfazer) se o teto
+    // falhar depois — senão sobra um grupo órfão sem teto/membros, que o
+    // groupCards filtra e fica invisível/inalcançável na UI.
+    let createdGroupId: string | null = null;
     try {
       let groupId = editingGroup?.id ?? null;
 
@@ -615,6 +619,7 @@ const GoalsPage = () => {
           .single();
         if (error) throw error;
         groupId = (data as { id: string }).id;
+        createdGroupId = groupId;
       }
 
       if (!groupId) throw new Error("grupo sem id");
@@ -638,6 +643,10 @@ const GoalsPage = () => {
       setGroupDialogOpen(false);
       void loadData();
     } catch (err) {
+      // Compensa a criação parcial: apaga o grupo recém-criado se o teto falhou.
+      if (createdGroupId) {
+        await supabase.from("budget_groups").delete().eq("id", createdGroupId);
+      }
       console.error("[Goals] saveGroup failed:", err);
       toast.error("Não foi possível salvar o grupo");
     } finally {
@@ -672,11 +681,13 @@ const GoalsPage = () => {
       } else {
         // Upsert onConflict(user_id,category_id): mover de outro grupo é atômico
         // (a UNIQUE garante 1 grupo por categoria). Constraint NÃO-parcial → o
-        // upsert do PostgREST casa o conflito.
+        // upsert do PostgREST casa o conflito. created_at explícito reseta o
+        // "mês de entrada" pro grupo atual — senão, ao mover A→B, o created_at
+        // antigo faria os meses passados serem atribuídos retroativamente a B.
         const { error } = await supabase
           .from("budget_group_categories")
           .upsert(
-            { group_id: group.id, category_id: categoryId, user_id: user.id, family_id: family.id },
+            { group_id: group.id, category_id: categoryId, user_id: user.id, family_id: family.id, created_at: new Date().toISOString() },
             { onConflict: "user_id,category_id" },
           );
         if (error) throw error;

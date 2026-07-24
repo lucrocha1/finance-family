@@ -239,16 +239,17 @@ const checkWeeklySummary = async (sb: SupabaseClient, userId: string): Promise<N
 
 // 3. Orçamento 80% e 100% (categorias avulsas + GRUPOS de orçamento)
 const checkBudgets = async (sb: SupabaseClient, userId: string): Promise<Notif[]> => {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = now.getMonth() + 1;
-  const startIso = toIso(new Date(year, now.getMonth(), 1));
-  const endIso = toIso(new Date(year, now.getMonth() + 1, 0));
+  // Mês corrente em BRT (não UTC) — igual aos checks vizinhos (brtParts) e ao
+  // app, pra a supressão e o gasto-por-grupo baterem entre UI e notificação.
+  const { y: year, m: month } = brtParts();
+  const mk = `${year}-${pad2(month)}`;
+  const startIso = `${year}-${pad2(month)}-01`;
+  const endIso = `${year}-${pad2(month)}-${pad2(new Date(Date.UTC(year, month, 0)).getUTCDate())}`;
 
   const [budgetsRes, txRes, catsRes, groupsRes, groupLimitsRes, groupCatsRes] = await Promise.all([
     sb.from("budgets").select("category_id, amount, year, month").eq("user_id", userId),
     sb.from("transactions").select("category_id, amount, card_id, description").eq("user_id", userId).eq("type", "expense").gte("date", startIso).lte("date", endIso),
-    sb.from("categories").select("id, name").eq("user_id", userId),
+    sb.from("categories").select("id, name, type").eq("user_id", userId),
     sb.from("budget_groups").select("id, name").eq("user_id", userId),
     sb.from("budget_group_limits").select("group_id, amount, year, month").eq("user_id", userId),
     sb.from("budget_group_categories").select("group_id, category_id, created_at").eq("user_id", userId),
@@ -283,6 +284,12 @@ const checkBudgets = async (sb: SupabaseClient, userId: string): Promise<Notif[]
     spentByCat.set(t.category_id, (spentByCat.get(t.category_id) ?? 0) + Number(t.amount || 0));
   });
   const catName = new Map<string, string>((catsRes.data ?? []).map((c: any) => [c.id, c.name]));
+  // Categorias "visíveis" p/ orçamento = despesa ou sem tipo (mesma regra do app
+  // Goals.tsx: .or("type.eq.expense,type.is.null")). Categoria que virou receita
+  // sai daqui e não conta mais no gasto — igual ao groupCards/budgetSummary/cards.
+  const visibleCatIds = new Set<string>(
+    (catsRes.data ?? []).filter((c: any) => c.type === "expense" || c.type == null).map((c: any) => c.id),
+  );
 
   // ————— Grupos de orçamento (teto combinado) —————
   const groupName = new Map<string, string>((groupsRes.data ?? []).map((g: any) => [g.id, g.name]));
@@ -305,16 +312,21 @@ const checkBudgets = async (sb: SupabaseClient, userId: string): Promise<Notif[]
   const spentByGroup = new Map<string, number>();
   (groupCatsRes.data ?? []).forEach((m: any) => {
     if (!groupActiveLimit.has(m.group_id)) return;
-    const d = new Date(m.created_at);
-    const joinOrd = d.getFullYear() * 12 + (d.getMonth() + 1);
+    const cd = brtParts(new Date(m.created_at)); // mês de entrada em BRT (não UTC)
+    const joinOrd = cd.y * 12 + cd.m;
     if (cap < joinOrd) return;
     suppressedCats.add(m.category_id);
-    spentByGroup.set(m.group_id, (spentByGroup.get(m.group_id) ?? 0) + (spentByCat.get(m.category_id) ?? 0));
+    // Só soma no gasto do grupo se a categoria ainda é visível (despesa) — igual
+    // ao app (groupCards filtra por visibleIds). A supressão fica incondicional.
+    if (visibleCatIds.has(m.category_id)) {
+      spentByGroup.set(m.group_id, (spentByGroup.get(m.group_id) ?? 0) + (spentByCat.get(m.category_id) ?? 0));
+    }
   });
 
   const items: Notif[] = [];
   budgetByCat.forEach((value: any, catId: string) => {
     if (suppressedCats.has(catId)) return; // coberta pelo alerta do grupo
+    if (!visibleCatIds.has(catId)) return; // categoria removida/virou receita → some (igual app)
     const limit = value.amount;
     if (limit <= 0) return;
     const spent = spentByCat.get(catId) ?? 0;
@@ -326,7 +338,7 @@ const checkBudgets = async (sb: SupabaseClient, userId: string): Promise<Notif[]
         title: `Orçamento estourado — ${name}`,
         body: `Gastou ${ptCurrency(spent)} de ${ptCurrency(limit)} (${pct.toFixed(0)}%).`,
         link_to: "/goals",
-        dedup_key: `budget_over:${catId}:${monthKey(now)}`,
+        dedup_key: `budget_over:${catId}:${mk}`,
       });
     } else if (pct >= 80) {
       items.push({
@@ -334,7 +346,7 @@ const checkBudgets = async (sb: SupabaseClient, userId: string): Promise<Notif[]
         title: `${name} chegou em ${pct.toFixed(0)}% do limite`,
         body: `${ptCurrency(spent)} de ${ptCurrency(limit)}.`,
         link_to: "/goals",
-        dedup_key: `budget_warn:${catId}:${monthKey(now)}`,
+        dedup_key: `budget_warn:${catId}:${mk}`,
       });
     }
   });
@@ -351,7 +363,7 @@ const checkBudgets = async (sb: SupabaseClient, userId: string): Promise<Notif[]
         title: `Grupo estourado — ${name}`,
         body: `O grupo gastou ${ptCurrency(spent)} de ${ptCurrency(limit)} (${pct.toFixed(0)}%).`,
         link_to: "/goals",
-        dedup_key: `budget_group_over:${groupId}:${monthKey(now)}`,
+        dedup_key: `budget_group_over:${groupId}:${mk}`,
       });
     } else if (pct >= 80) {
       items.push({
@@ -359,7 +371,7 @@ const checkBudgets = async (sb: SupabaseClient, userId: string): Promise<Notif[]
         title: `Grupo ${name} em ${pct.toFixed(0)}% do teto`,
         body: `${ptCurrency(spent)} de ${ptCurrency(limit)}.`,
         link_to: "/goals",
-        dedup_key: `budget_group_warn:${groupId}:${monthKey(now)}`,
+        dedup_key: `budget_group_warn:${groupId}:${mk}`,
       });
     }
   });
