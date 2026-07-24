@@ -237,7 +237,7 @@ const checkWeeklySummary = async (sb: SupabaseClient, userId: string): Promise<N
   }];
 };
 
-// 3. Orçamento 80% e 100%
+// 3. Orçamento 80% e 100% (categorias avulsas + GRUPOS de orçamento)
 const checkBudgets = async (sb: SupabaseClient, userId: string): Promise<Notif[]> => {
   const now = new Date();
   const year = now.getFullYear();
@@ -245,13 +245,29 @@ const checkBudgets = async (sb: SupabaseClient, userId: string): Promise<Notif[]
   const startIso = toIso(new Date(year, now.getMonth(), 1));
   const endIso = toIso(new Date(year, now.getMonth() + 1, 0));
 
-  const [budgetsRes, txRes, catsRes] = await Promise.all([
+  const [budgetsRes, txRes, catsRes, groupsRes, groupLimitsRes, groupCatsRes] = await Promise.all([
     sb.from("budgets").select("category_id, amount, year, month").eq("user_id", userId),
     sb.from("transactions").select("category_id, amount, card_id, description").eq("user_id", userId).eq("type", "expense").gte("date", startIso).lte("date", endIso),
     sb.from("categories").select("id, name").eq("user_id", userId),
+    sb.from("budget_groups").select("id, name").eq("user_id", userId),
+    sb.from("budget_group_limits").select("group_id, amount, year, month").eq("user_id", userId),
+    sb.from("budget_group_categories").select("group_id, category_id, created_at").eq("user_id", userId),
   ]);
 
   const cap = year * 12 + month;
+
+  // Regra "sticky" (mesma do app em src/lib/budgetSticky.ts): teto vigente = o
+  // registro mais recente com (year*12+month) <= cap; amount<=0 encerra vigência.
+  const stickyAmount = (rows: Array<{ amount: number; year: number; month: number }>): number | null => {
+    let best: { amount: number; order: number } | null = null;
+    for (const r of rows) {
+      const order = r.year * 12 + r.month;
+      if (order > cap) continue;
+      if (!best || order > best.order) best = { amount: Number(r.amount || 0), order };
+    }
+    return best && best.amount > 0 ? best.amount : null;
+  };
+
   const budgetByCat = new Map<string, any>();
   (budgetsRes.data ?? []).forEach((b: any) => {
     if (b.year * 12 + b.month > cap) return;
@@ -268,8 +284,37 @@ const checkBudgets = async (sb: SupabaseClient, userId: string): Promise<Notif[]
   });
   const catName = new Map<string, string>((catsRes.data ?? []).map((c: any) => [c.id, c.name]));
 
+  // ————— Grupos de orçamento (teto combinado) —————
+  const groupName = new Map<string, string>((groupsRes.data ?? []).map((g: any) => [g.id, g.name]));
+  const limitsByGroup = new Map<string, Array<{ amount: number; year: number; month: number }>>();
+  (groupLimitsRes.data ?? []).forEach((l: any) => {
+    const arr = limitsByGroup.get(l.group_id) ?? [];
+    arr.push({ amount: Number(l.amount || 0), year: l.year, month: l.month });
+    limitsByGroup.set(l.group_id, arr);
+  });
+  const groupActiveLimit = new Map<string, number>(); // só grupos com teto ativo (>0)
+  (groupsRes.data ?? []).forEach((g: any) => {
+    const amt = stickyAmount(limitsByGroup.get(g.id) ?? []);
+    if (amt != null) groupActiveLimit.set(g.id, amt);
+  });
+
+  // Categorias cujo teto individual é SUPRIMIDO (notificam via grupo) + gasto do
+  // grupo = soma dos membros a partir do mês de entrada. Grupo sem teto ativo não
+  // suprime nada (o teto individual da categoria continua valendo/notificando).
+  const suppressedCats = new Set<string>();
+  const spentByGroup = new Map<string, number>();
+  (groupCatsRes.data ?? []).forEach((m: any) => {
+    if (!groupActiveLimit.has(m.group_id)) return;
+    const d = new Date(m.created_at);
+    const joinOrd = d.getFullYear() * 12 + (d.getMonth() + 1);
+    if (cap < joinOrd) return;
+    suppressedCats.add(m.category_id);
+    spentByGroup.set(m.group_id, (spentByGroup.get(m.group_id) ?? 0) + (spentByCat.get(m.category_id) ?? 0));
+  });
+
   const items: Notif[] = [];
   budgetByCat.forEach((value: any, catId: string) => {
+    if (suppressedCats.has(catId)) return; // coberta pelo alerta do grupo
     const limit = value.amount;
     if (limit <= 0) return;
     const spent = spentByCat.get(catId) ?? 0;
@@ -293,6 +338,32 @@ const checkBudgets = async (sb: SupabaseClient, userId: string): Promise<Notif[]
       });
     }
   });
+
+  // Alertas por GRUPO (teto combinado sobre as categorias membros).
+  groupActiveLimit.forEach((limit: number, groupId: string) => {
+    if (limit <= 0) return;
+    const spent = spentByGroup.get(groupId) ?? 0;
+    const pct = (spent / limit) * 100;
+    const name = groupName.get(groupId) || "grupo";
+    if (pct >= 100) {
+      items.push({
+        user_id: userId, kind: "budget_group_over", severity: "danger",
+        title: `Grupo estourado — ${name}`,
+        body: `O grupo gastou ${ptCurrency(spent)} de ${ptCurrency(limit)} (${pct.toFixed(0)}%).`,
+        link_to: "/goals",
+        dedup_key: `budget_group_over:${groupId}:${monthKey(now)}`,
+      });
+    } else if (pct >= 80) {
+      items.push({
+        user_id: userId, kind: "budget_group_warn", severity: "warning",
+        title: `Grupo ${name} em ${pct.toFixed(0)}% do teto`,
+        body: `${ptCurrency(spent)} de ${ptCurrency(limit)}.`,
+        link_to: "/goals",
+        dedup_key: `budget_group_warn:${groupId}:${monthKey(now)}`,
+      });
+    }
+  });
+
   return items;
 };
 

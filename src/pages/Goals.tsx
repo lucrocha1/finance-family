@@ -5,10 +5,13 @@ import {
   ChevronLeft,
   ChevronRight,
   CircleDollarSign,
+  FolderPlus,
+  Layers,
   Pencil,
   Plus,
   Target,
   Trash2,
+  Users,
   Wallet,
   X,
 } from "lucide-react";
@@ -38,6 +41,7 @@ import { useFamily } from "@/contexts/FamilyContext";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
 import { isInvoicePayment } from "@/lib/invoicePayment";
+import { activeStickyAmount } from "@/lib/budgetSticky";
 
 type Tab = "budget" | "goals";
 type GoalStatus = "active" | "paused" | "completed";
@@ -58,6 +62,28 @@ type BudgetRow = {
   year: number;
   user_id: string;
   family_id: string;
+};
+
+type BudgetGroupRow = {
+  id: string;
+  name: string;
+  color: string | null;
+  icon: string | null;
+};
+
+type BudgetGroupLimitRow = {
+  id: string;
+  group_id: string;
+  amount: number;
+  month: number;
+  year: number;
+};
+
+type BudgetGroupCategoryRow = {
+  id: string;
+  group_id: string;
+  category_id: string;
+  created_at: string;
 };
 
 type GoalRow = {
@@ -132,6 +158,19 @@ const GoalsPage = () => {
   const [budgetAmountDigits, setBudgetAmountDigits] = useState("");
   const [savingBudget, setSavingBudget] = useState(false);
 
+  // Grupos de orçamento (teto combinado sobre várias categorias)
+  const [budgetGroups, setBudgetGroups] = useState<BudgetGroupRow[]>([]);
+  const [groupLimits, setGroupLimits] = useState<BudgetGroupLimitRow[]>([]);
+  const [groupMembers, setGroupMembers] = useState<BudgetGroupCategoryRow[]>([]);
+  const [groupDialogOpen, setGroupDialogOpen] = useState(false);
+  const [editingGroup, setEditingGroup] = useState<BudgetGroupRow | null>(null);
+  const [groupNameInput, setGroupNameInput] = useState("");
+  const [groupLimitDigits, setGroupLimitDigits] = useState("");
+  const [groupSaving, setGroupSaving] = useState(false);
+  const [groupToDelete, setGroupToDelete] = useState<BudgetGroupRow | null>(null);
+  const [membersDialogGroup, setMembersDialogGroup] = useState<BudgetGroupRow | null>(null);
+  const [membersSaving, setMembersSaving] = useState(false);
+
   const [goalModalOpen, setGoalModalOpen] = useState(false);
   const [editingGoal, setEditingGoal] = useState<GoalRow | null>(null);
   const [goalName, setGoalName] = useState("");
@@ -172,6 +211,9 @@ const GoalsPage = () => {
       setGoals([]);
       setContributions([]);
       setMonthExpenses(new Map());
+      setBudgetGroups([]);
+      setGroupLimits([]);
+      setGroupMembers([]);
       return;
     }
 
@@ -180,7 +222,7 @@ const GoalsPage = () => {
     // RLS already enforces user_id = auth.uid() on every financial table,
     // so .eq("family_id", family.id) is redundant — and actively hides
     // rows whose family_id drifted from the current FamilyContext.
-    const [categoriesRes, budgetsRes, txRes, goalsRes, contribRes] = await Promise.all([
+    const [categoriesRes, budgetsRes, txRes, goalsRes, contribRes, groupsRes, groupLimitsRes, groupCatsRes] = await Promise.all([
       supabase.from("categories").select("id, name, color, icon, type").or("type.eq.expense,type.is.null").order("name", { ascending: true }),
       // Limites valem do mês em que foram setados em diante (sticky).
       // Carregamos todos até o mês selecionado e pegamos o mais recente
@@ -189,11 +231,18 @@ const GoalsPage = () => {
       supabase.from("transactions").select("category_id, amount, type, date, card_id, description").eq("type", "expense").gte("date", from).lte("date", to),
       supabase.from("goals").select("*").order("created_at", { ascending: false }),
       supabase.from("goal_contributions").select("*").order("date", { ascending: false }),
+      // Grupos de orçamento: teto sticky por grupo + junção categoria→grupo.
+      supabase.from("budget_groups").select("id, name, color, icon").order("created_at", { ascending: true }),
+      supabase.from("budget_group_limits").select("id, group_id, amount, month, year"),
+      supabase.from("budget_group_categories").select("id, group_id, category_id, created_at"),
     ]);
 
-    // Goals/contrib errors são tolerados — a aba Orçamento não depende deles.
+    // Goals/contrib/grupos errors são tolerados — a aba Orçamento não depende deles.
     if (goalsRes.error) console.warn("[Goals] goals query failed:", goalsRes.error);
     if (contribRes.error) console.warn("[Goals] goal_contributions query failed:", contribRes.error);
+    if (groupsRes.error) console.warn("[Goals] budget_groups query failed:", groupsRes.error);
+    if (groupLimitsRes.error) console.warn("[Goals] budget_group_limits query failed:", groupLimitsRes.error);
+    if (groupCatsRes.error) console.warn("[Goals] budget_group_categories query failed:", groupCatsRes.error);
 
     if (categoriesRes.error || budgetsRes.error || txRes.error) {
       toast.error("Erro ao carregar Metas & Orçamento");
@@ -241,6 +290,11 @@ const GoalsPage = () => {
     setGoals(nextGoals);
     setContributions(nextContrib);
     setMonthExpenses(expenseMap);
+    setBudgetGroups((groupsRes.data as BudgetGroupRow[] | null) ?? []);
+    setGroupLimits(
+      ((groupLimitsRes.data as BudgetGroupLimitRow[] | null) ?? []).map((l) => ({ ...l, amount: Number(l.amount ?? 0) })),
+    );
+    setGroupMembers((groupCatsRes.data as BudgetGroupCategoryRow[] | null) ?? []);
     setLoading(false);
   }, [family?.id, from, to]);
 
@@ -267,8 +321,56 @@ const GoalsPage = () => {
     return map;
   }, [budgets, month, year]);
 
+  // ————— Grupos de orçamento: memos derivados —————
+  // Teto vigente por grupo (sticky, só quando > 0). Espelha budgetByCategory.
+  const groupLimitByGroup = useMemo(() => {
+    const byGroup = new Map<string, BudgetGroupLimitRow[]>();
+    groupLimits.forEach((l) => {
+      const arr = byGroup.get(l.group_id) ?? [];
+      arr.push(l);
+      byGroup.set(l.group_id, arr);
+    });
+    const map = new Map<string, number | null>();
+    budgetGroups.forEach((g) => map.set(g.id, activeStickyAmount(byGroup.get(g.id) ?? [], year, month)));
+    return map;
+  }, [budgetGroups, groupLimits, year, month]);
+
+  const membersByGroup = useMemo(() => {
+    const map = new Map<string, BudgetGroupCategoryRow[]>();
+    groupMembers.forEach((m) => {
+      const arr = map.get(m.group_id) ?? [];
+      arr.push(m);
+      map.set(m.group_id, arr);
+    });
+    return map;
+  }, [groupMembers]);
+
+  const memberGroupByCategory = useMemo(() => {
+    const map = new Map<string, string>();
+    groupMembers.forEach((m) => map.set(m.category_id, m.group_id));
+    return map;
+  }, [groupMembers]);
+
+  // Categorias cujo teto INDIVIDUAL é suprimido neste mês: membro de um grupo
+  // com teto ativo, a partir do mês de entrada (created_at). Sem teto de grupo
+  // ativo → NÃO suprime (fallback: o limite individual continua protegendo).
+  const suppressedCategoryIds = useMemo(() => {
+    const cap = year * 12 + month;
+    const set = new Set<string>();
+    groupMembers.forEach((m) => {
+      if (groupLimitByGroup.get(m.group_id) == null) return;
+      const d = new Date(m.created_at);
+      const joinOrd = d.getFullYear() * 12 + (d.getMonth() + 1);
+      if (cap < joinOrd) return; // antes de entrar no grupo, mantém teto individual
+      set.add(m.category_id);
+    });
+    return set;
+  }, [groupMembers, groupLimitByGroup, year, month]);
+
   const budgetCards = useMemo(() => {
-    const rows = categories.map((category) => {
+    const rows = categories
+      .filter((category) => !suppressedCategoryIds.has(category.id))
+      .map((category) => {
       const spent = monthExpenses.get(category.id) ?? 0;
       const rawBudget = budgetByCategory.get(category.id);
       // Marcador amount=0 (fim de vigência de um limite herdado — F24) conta como
@@ -287,7 +389,37 @@ const GoalsPage = () => {
       if (a.budget && b.budget) return b.percent - a.percent;
       return a.category.name.localeCompare(b.category.name, "pt-BR");
     });
-  }, [budgetByCategory, categories, monthExpenses]);
+  }, [budgetByCategory, categories, monthExpenses, suppressedCategoryIds]);
+
+  // Cards de grupo: gasto = soma dos membros ATIVOS no mês (a partir do mês de
+  // entrada), % sobre o teto do grupo. Só membros de categorias visíveis contam.
+  const groupCards = useMemo(() => {
+    const cap = year * 12 + month;
+    const visibleIds = new Set(categories.map((c) => c.id));
+    return budgetGroups
+      .map((group) => {
+        const limit = groupLimitByGroup.get(group.id) ?? null;
+        const members = (membersByGroup.get(group.id) ?? []).filter((m) => {
+          if (!visibleIds.has(m.category_id)) return false;
+          const d = new Date(m.created_at);
+          const joinOrd = d.getFullYear() * 12 + (d.getMonth() + 1);
+          return cap >= joinOrd; // conta só a partir do mês de entrada
+        });
+        const memberCats = members
+          .map((m) => {
+            const cat = categories.find((c) => c.id === m.category_id);
+            return cat ? { ...cat, spent: monthExpenses.get(cat.id) ?? 0 } : null;
+          })
+          .filter((c): c is CategoryRow & { spent: number } => Boolean(c))
+          .sort((a, b) => b.spent - a.spent);
+        const spent = memberCats.reduce((s, c) => s + c.spent, 0);
+        const percent = limit && limit > 0 ? (spent / limit) * 100 : 0;
+        const overAmount = limit ? Math.max(spent - limit, 0) : 0;
+        return { group, limit, spent, percent, overAmount, memberCats, memberCount: memberCats.length };
+      })
+      .filter((gc) => gc.limit != null || gc.memberCount > 0)
+      .sort((a, b) => b.percent - a.percent);
+  }, [budgetGroups, groupLimitByGroup, membersByGroup, categories, monthExpenses, year, month]);
 
   const budgetSummary = useMemo(() => {
     // Total orçado = soma dos sticky budgets vigentes no mês visualizado
@@ -302,15 +434,32 @@ const GoalsPage = () => {
     let totalSpent = 0;
     budgetByCategory.forEach((b, categoryId) => {
       if (!visibleIds.has(categoryId)) return;
+      if (suppressedCategoryIds.has(categoryId)) return; // contabilizada via grupo
       if (Number(b.amount || 0) <= 0) return; // marcador de fim de vigência (F24)
       totalBudget += Number(b.amount || 0);
       totalSpent += monthExpenses.get(categoryId) ?? 0;
     });
+    // Grupos com teto ativo entram pelo teto/gasto do GRUPO (os tetos individuais
+    // das categorias agrupadas estão suprimidos acima → sem dupla contagem).
+    groupCards.forEach((gc) => {
+      if (gc.limit == null) return;
+      totalBudget += gc.limit;
+      totalSpent += gc.spent;
+    });
     return { totalBudget, totalSpent, available: totalBudget - totalSpent };
-  }, [budgetByCategory, categories, monthExpenses]);
+  }, [budgetByCategory, categories, monthExpenses, suppressedCategoryIds, groupCards]);
 
   const budgetChartData = useMemo(() => {
-    return budgetCards
+    const groupBars = groupCards
+      .filter((gc) => gc.limit != null && gc.limit > 0)
+      .map((gc) => ({
+        id: `group:${gc.group.id}`,
+        category: `▣ ${gc.group.name}`,
+        budget: gc.limit ?? 0,
+        spent: gc.spent,
+        spentFill: gc.spent > (gc.limit ?? 0) ? "hsl(var(--destructive))" : gc.group.color || "hsl(var(--accent))",
+      }));
+    const catBars = budgetCards
       .filter((row) => row.budget && row.limit && row.limit > 0)
       .map((row) => ({
         id: row.category.id,
@@ -319,7 +468,8 @@ const GoalsPage = () => {
         spent: row.spent,
         spentFill: row.spent > (row.limit ?? 0) ? "hsl(var(--destructive))" : row.category.color || "hsl(var(--accent))",
       }));
-  }, [budgetCards]);
+    return [...groupBars, ...catBars];
+  }, [budgetCards, groupCards]);
 
   const goalsSummary = useMemo(() => {
     // "Total guardado" soma TODAS as metas (não cai quando uma é concluída);
@@ -418,6 +568,126 @@ const GoalsPage = () => {
     toast.success("Limite removido");
     cancelBudgetEditor();
     void loadData();
+  };
+
+  // ————— Handlers de grupos de orçamento —————
+  const openNewGroup = () => {
+    setEditingGroup(null);
+    setGroupNameInput("");
+    setGroupLimitDigits("");
+    setGroupDialogOpen(true);
+  };
+
+  const openEditGroup = (group: BudgetGroupRow) => {
+    setEditingGroup(group);
+    setGroupNameInput(group.name);
+    const current = groupLimitByGroup.get(group.id);
+    setGroupLimitDigits(current && current > 0 ? moneyValueToDigits(current) : "");
+    setGroupDialogOpen(true);
+  };
+
+  const saveGroup = async () => {
+    if (!family?.id || !user?.id) return;
+    const name = groupNameInput.trim();
+    if (name.length < 1 || name.length > 60) {
+      toast.error("Dê um nome ao grupo (até 60 caracteres)");
+      return;
+    }
+    const amount = moneyDigitsToValue(groupLimitDigits);
+    if (amount <= 0) {
+      // "Teto primeiro": o grupo nasce com um teto pra proteger as categorias.
+      toast.error("Defina o teto do grupo (maior que zero)");
+      return;
+    }
+
+    setGroupSaving(true);
+    try {
+      let groupId = editingGroup?.id ?? null;
+
+      if (editingGroup) {
+        const { error } = await supabase.from("budget_groups").update({ name }).eq("id", editingGroup.id);
+        if (error) throw error;
+      } else {
+        const { data, error } = await supabase
+          .from("budget_groups")
+          .insert({ family_id: family.id, user_id: user.id, name })
+          .select("id")
+          .single();
+        if (error) throw error;
+        groupId = (data as { id: string }).id;
+      }
+
+      if (!groupId) throw new Error("grupo sem id");
+
+      // Teto sticky: atualiza se já existe linha DESTE mês; senão cria nova
+      // (preserva o histórico dos meses anteriores).
+      const existing = groupLimits.find((l) => l.group_id === groupId && l.year === year && l.month === month);
+      const { error: limitErr } = existing
+        ? await supabase.from("budget_group_limits").update({ amount }).eq("id", existing.id)
+        : await supabase.from("budget_group_limits").insert({
+            group_id: groupId,
+            user_id: user.id,
+            family_id: family.id,
+            amount,
+            month,
+            year,
+          });
+      if (limitErr) throw limitErr;
+
+      toast.success(editingGroup ? "Grupo atualizado" : "Grupo criado");
+      setGroupDialogOpen(false);
+      void loadData();
+    } catch (err) {
+      console.error("[Goals] saveGroup failed:", err);
+      toast.error("Não foi possível salvar o grupo");
+    } finally {
+      setGroupSaving(false);
+    }
+  };
+
+  const deleteGroup = async (group: BudgetGroupRow) => {
+    // O cascade (FK on delete cascade) apaga tetos e junções do grupo. As
+    // categorias voltam a valer pelo limite individual. Não apaga transações.
+    const { error } = await supabase.from("budget_groups").delete().eq("id", group.id);
+    if (error) {
+      toast.error("Não foi possível excluir o grupo");
+      return;
+    }
+    toast.success("Grupo excluído");
+    setGroupToDelete(null);
+    void loadData();
+  };
+
+  const toggleMember = async (group: BudgetGroupRow, categoryId: string, isMember: boolean) => {
+    if (!family?.id || !user?.id) return;
+    setMembersSaving(true);
+    try {
+      if (isMember) {
+        // Remove da junção → a categoria volta a ter teto individual.
+        const row = groupMembers.find((m) => m.group_id === group.id && m.category_id === categoryId);
+        if (row) {
+          const { error } = await supabase.from("budget_group_categories").delete().eq("id", row.id);
+          if (error) throw error;
+        }
+      } else {
+        // Upsert onConflict(user_id,category_id): mover de outro grupo é atômico
+        // (a UNIQUE garante 1 grupo por categoria). Constraint NÃO-parcial → o
+        // upsert do PostgREST casa o conflito.
+        const { error } = await supabase
+          .from("budget_group_categories")
+          .upsert(
+            { group_id: group.id, category_id: categoryId, user_id: user.id, family_id: family.id },
+            { onConflict: "user_id,category_id" },
+          );
+        if (error) throw error;
+      }
+      void loadData();
+    } catch (err) {
+      console.error("[Goals] toggleMember failed:", err);
+      toast.error("Não foi possível atualizar as categorias do grupo");
+    } finally {
+      setMembersSaving(false);
+    }
   };
 
   const openCreateGoal = () => {
@@ -677,7 +947,116 @@ const GoalsPage = () => {
             </Card>
           </div>
 
+          {/* ————— Grupos de orçamento ————— */}
           <div className="space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <Layers className="h-5 w-5 text-accent" />
+                <h2 className="text-lg font-bold text-foreground">Grupos de orçamento</h2>
+              </div>
+              <Button variant="outline" size="sm" onClick={openNewGroup}>
+                <FolderPlus className="mr-1 h-4 w-4" /> Novo grupo
+              </Button>
+            </div>
+
+            {!loading && groupCards.length === 0 ? (
+              <Card className="rounded-xl border-dashed border-border bg-card">
+                <CardContent className="p-5 text-sm text-muted-foreground">
+                  Crie um grupo pra definir <span className="font-semibold text-foreground">um teto único sobre várias categorias</span> — ex.: Roupa, Lazer e Cuidados somando no máximo R$ 1.000,00. O gasto das categorias do grupo passa a valer pelo teto do grupo.
+                </CardContent>
+              </Card>
+            ) : (
+              groupCards.map((gc) => {
+                const usage = gc.limit && gc.limit > 0 ? clampPercent(gc.percent) : 0;
+                const usageColor = gc.percent < 70 ? "bg-success" : gc.percent < 90 ? "bg-warning" : "bg-destructive";
+                const accent = gc.group.color || "hsl(var(--accent))";
+                return (
+                  <Card key={gc.group.id} className="rounded-xl border-border bg-card">
+                    <CardContent className="space-y-3 p-5">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div className="flex items-center gap-3">
+                          <span className="flex h-9 w-9 items-center justify-center rounded-lg" style={{ backgroundColor: `${accent}22` }}>
+                            <Layers className="h-4 w-4" style={{ color: accent }} />
+                          </span>
+                          <div>
+                            <p className="font-semibold text-foreground">{gc.group.name}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {gc.memberCount} {gc.memberCount === 1 ? "categoria" : "categorias"}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <Button variant="outline" size="sm" onClick={() => setMembersDialogGroup(gc.group)}>
+                            <Users className="mr-1 h-3.5 w-3.5" /> Categorias
+                          </Button>
+                          <Button variant="outline" size="sm" onClick={() => openEditGroup(gc.group)}>
+                            <Pencil className="mr-1 h-3.5 w-3.5" /> Teto
+                          </Button>
+                          <Button variant="ghost" size="icon" aria-label="Excluir grupo" className="text-muted-foreground hover:text-destructive" onClick={() => setGroupToDelete(gc.group)}>
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </div>
+
+                      {gc.limit && gc.limit > 0 ? (
+                        <>
+                          <div className="relative h-3 w-full rounded-full bg-secondary">
+                            <div className={cn("h-3 rounded-full", usageColor)} style={{ width: `${Math.min(usage, 100)}%` }} />
+                            <span
+                              className="absolute top-1/2 h-4 w-0.5 -translate-y-1/2 rounded-full bg-foreground/50"
+                              style={{ left: "80%" }}
+                              title="Alerta em 80% do teto"
+                            />
+                          </div>
+                          <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+                            <span className="text-muted-foreground">
+                              {ptCurrency.format(gc.spent)} de {ptCurrency.format(gc.limit)}
+                            </span>
+                            <span className="font-semibold text-foreground">{gc.percent.toFixed(1)}% usado</span>
+                          </div>
+                          {gc.overAmount > 0 ? (
+                            <div className="inline-flex rounded-full bg-destructive/15 px-3 py-1 text-xs font-semibold text-destructive">
+                              Estourou! +{ptCurrency.format(gc.overAmount)}
+                            </div>
+                          ) : null}
+                        </>
+                      ) : (
+                        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-dashed border-warning/40 bg-warning/5 p-3 text-sm">
+                          <span className="text-muted-foreground">Sem teto ativo neste mês — as categorias valem pelo limite individual.</span>
+                          <Button variant="outline" size="sm" onClick={() => openEditGroup(gc.group)}>Definir teto</Button>
+                        </div>
+                      )}
+
+                      {gc.memberCats.length > 0 ? (
+                        <div className="space-y-1.5 rounded-lg bg-secondary/40 p-3">
+                          {gc.memberCats.map((c) => (
+                            <div key={c.id} className="flex items-center justify-between gap-2 text-sm">
+                              <span className="flex items-center gap-2 text-muted-foreground">
+                                <span className="h-2 w-2 rounded-full" style={{ backgroundColor: c.color || "hsl(var(--accent))" }} />
+                                <span>{c.icon || "🏷️"} {c.name}</span>
+                              </span>
+                              <span className="font-medium text-foreground">{ptCurrency.format(c.spent)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-sm text-muted-foreground">
+                          Nenhuma categoria no grupo ainda. Toque em <span className="font-medium text-foreground">Categorias</span> pra adicionar.
+                        </p>
+                      )}
+                    </CardContent>
+                  </Card>
+                );
+              })
+            )}
+          </div>
+
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <Wallet className="h-5 w-5 text-accent" />
+              <h2 className="text-lg font-bold text-foreground">Limites por categoria</h2>
+            </div>
             {loading ? (
               <SectionEmpty text="Carregando orçamento..." />
             ) : budgetCards.length === 0 ? (
@@ -1154,6 +1533,116 @@ const GoalsPage = () => {
               }}
             >
               Remover
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Criar / editar grupo (nome + teto — "teto primeiro") */}
+      <Dialog open={groupDialogOpen} onOpenChange={setGroupDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>{editingGroup ? "Editar grupo" : "Novo grupo de orçamento"}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="group-name">Nome do grupo</Label>
+              <Input
+                id="group-name"
+                value={groupNameInput}
+                maxLength={60}
+                onChange={(event) => setGroupNameInput(event.target.value)}
+                placeholder="Ex.: Essenciais, Lazer & Cuidados"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="group-limit">Teto do grupo (deste mês em diante)</Label>
+              <Input
+                id="group-limit"
+                inputMode="numeric"
+                value={ptCurrency.format(moneyDigitsToValue(groupLimitDigits))}
+                onChange={(event) => setGroupLimitDigits(event.target.value.replace(/\D/g, ""))}
+                placeholder="R$ 0,00"
+              />
+              <p className="text-xs text-muted-foreground">
+                A soma dos gastos das categorias do grupo não deve passar deste valor. O limite vale pros próximos meses até você mudar.
+              </p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setGroupDialogOpen(false)}>Cancelar</Button>
+            <Button disabled={groupSaving} onClick={() => void saveGroup()}>
+              {editingGroup ? "Salvar" : "Criar grupo"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Gerenciar categorias do grupo */}
+      <Dialog open={Boolean(membersDialogGroup)} onOpenChange={(open) => { if (!open) setMembersDialogGroup(null); }}>
+        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Categorias de {membersDialogGroup?.name}</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Marque as categorias que somam no teto deste grupo. Uma categoria só pode estar em um grupo — marcá-la aqui a move automaticamente.
+          </p>
+          <div className="space-y-1.5">
+            {categories.length === 0 ? (
+              <p className="py-6 text-center text-sm text-muted-foreground">Nenhuma categoria de despesa cadastrada.</p>
+            ) : (
+              categories.map((cat) => {
+                const ownerGroupId = memberGroupByCategory.get(cat.id);
+                const isMember = ownerGroupId === membersDialogGroup?.id;
+                const otherGroup = ownerGroupId && !isMember ? budgetGroups.find((g) => g.id === ownerGroupId) : null;
+                return (
+                  <button
+                    key={cat.id}
+                    type="button"
+                    disabled={membersSaving || !membersDialogGroup}
+                    onClick={() => membersDialogGroup && void toggleMember(membersDialogGroup, cat.id, isMember)}
+                    className={cn(
+                      "flex w-full items-center justify-between gap-3 rounded-lg border p-3 text-left transition-colors disabled:opacity-60",
+                      isMember ? "border-accent bg-accent/10" : "border-border bg-card hover:bg-secondary/50",
+                    )}
+                  >
+                    <span className="flex flex-wrap items-center gap-2 text-sm">
+                      <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: cat.color || "hsl(var(--accent))" }} />
+                      <span>{cat.icon || "🏷️"} {cat.name}</span>
+                      {otherGroup ? (
+                        <span className="rounded-full bg-warning/15 px-2 py-0.5 text-xs text-warning">em {otherGroup.name}</span>
+                      ) : null}
+                    </span>
+                    <span className={cn("flex h-5 w-5 items-center justify-center rounded-md border", isMember ? "border-accent bg-accent text-accent-foreground" : "border-border")}>
+                      {isMember ? <Check className="h-3.5 w-3.5" /> : null}
+                    </span>
+                  </button>
+                );
+              })
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setMembersDialogGroup(null)}>Concluído</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Excluir grupo */}
+      <AlertDialog open={Boolean(groupToDelete)} onOpenChange={(open) => { if (!open) setGroupToDelete(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Excluir grupo?</AlertDialogTitle>
+            <AlertDialogDescription>
+              O grupo “{groupToDelete?.name}” e seu teto serão removidos. As categorias voltam a valer pelo limite individual. Nenhuma transação é apagada.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => groupToDelete && void deleteGroup(groupToDelete)}
+            >
+              Excluir
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
