@@ -562,7 +562,11 @@ const TransactionsPage = () => {
     // Se o user marcou como "Pago" no form e selecionou cartão, ignoramos
     // pra manter a lógica de limite/fluxo coerente.
     const isCardExpense = parsed.data.type === "expense" && Boolean(parsed.data.cardId);
-    const baseStatus = isCardExpense ? "pending" : parsed.data.status;
+    // Transação com data FUTURA não pode nascer "paga": o dinheiro ainda não saiu
+    // e o trigger de saldo (soma toda paga, sem olhar a data) derrubaria o Saldo
+    // atual HOJE. Força pendente — ela vira paga só quando for realmente marcada.
+    const isFutureDate = parsed.data.date > toISODate(new Date());
+    const baseStatus = isCardExpense || isFutureDate ? "pending" : parsed.data.status;
 
     const base = {
       description: parsed.data.description.trim(),
@@ -939,7 +943,13 @@ const TransactionsPage = () => {
     }
     // Transferência: marca as DUAS pernas como pagas juntas (F16); senão o
     // trigger aplica o efeito de saldo de um lado só e o total fica errado.
-    const updateQuery = supabase.from("transactions").update({ status: "paid" });
+    // Se a transação é FUTURA, marcar como paga = "paguei agora (adiantado)":
+    // alinha a data pro dia do pagamento (hoje), como o "Pagar Fatura" já faz.
+    // Senão o trigger debitaria HOJE uma tx datada no futuro, quebrando o Saldo.
+    const todayIso = toISODate(new Date());
+    const patch: { status: "paid"; date?: string } =
+      tx.date > todayIso ? { status: "paid", date: todayIso } : { status: "paid" };
+    const updateQuery = supabase.from("transactions").update(patch);
     const { error } = tx.type === "transfer" && tx.transfer_group_id
       ? await updateQuery.eq("transfer_group_id", tx.transfer_group_id)
       : await updateQuery.eq("id", tx.id);
@@ -1336,8 +1346,8 @@ const TransactionsPage = () => {
 
             <div className="space-y-2"><Label className="text-xs text-muted-foreground">Descrição</Label><Input value={description} onChange={(e) => setDescription(e.target.value.slice(0, 120))} placeholder="Ex: Supermercado, Salário, Aluguel..." className="h-[42px] rounded-lg border-border bg-secondary text-foreground" /></div>
             <div className="space-y-2"><Label className="text-xs text-muted-foreground">Valor</Label><div className="relative"><span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm font-semibold text-muted-foreground">R$</span><Input inputMode="numeric" value={amountDisplay.replace("R$", "").trim()} onChange={(e) => setAmountDigits(e.target.value.replace(/\D/g, "").slice(0, 12))} className="h-[42px] rounded-lg border-border bg-secondary pl-11 text-lg font-semibold text-foreground" /></div></div>
-            <div className="space-y-2"><Label className="text-xs text-muted-foreground">Data</Label><Popover><PopoverTrigger asChild><Button type="button" variant="outline" className="h-[42px] w-full justify-start rounded-lg border-border bg-secondary text-left font-normal"><CalendarIcon className="mr-2 h-4 w-4" />{date.toLocaleDateString("pt-BR")}</Button></PopoverTrigger><PopoverContent align="start" className="w-auto border-border bg-card p-0"><Calendar mode="single" selected={date} onSelect={(value) => value && setDate(value)} initialFocus className="p-3 pointer-events-auto" /></PopoverContent></Popover></div>
-            <div className="space-y-2"><Label className="text-xs text-muted-foreground">Status</Label><Select value={status} onValueChange={(value) => setStatus(value as "paid" | "pending")}><SelectTrigger className="h-[42px] rounded-lg border-border bg-secondary text-foreground"><SelectValue /></SelectTrigger><SelectContent className="border-border bg-card text-card-foreground"><SelectItem value="paid">Pago</SelectItem><SelectItem value="pending">Pendente</SelectItem></SelectContent></Select></div>
+            <div className="space-y-2"><Label className="text-xs text-muted-foreground">Data</Label><Popover><PopoverTrigger asChild><Button type="button" variant="outline" className="h-[42px] w-full justify-start rounded-lg border-border bg-secondary text-left font-normal"><CalendarIcon className="mr-2 h-4 w-4" />{date.toLocaleDateString("pt-BR")}</Button></PopoverTrigger><PopoverContent align="start" className="w-auto border-border bg-card p-0"><Calendar mode="single" selected={date} onSelect={(value) => { if (value) { setDate(value); if (toISODate(value) > toISODate(new Date())) setStatus("pending"); } }} initialFocus className="p-3 pointer-events-auto" /></PopoverContent></Popover></div>
+            <div className="space-y-2"><Label className="text-xs text-muted-foreground">Status</Label><Select value={status} onValueChange={(value) => setStatus(value as "paid" | "pending")} disabled={toISODate(date) > toISODate(new Date())}><SelectTrigger className="h-[42px] rounded-lg border-border bg-secondary text-foreground"><SelectValue /></SelectTrigger><SelectContent className="border-border bg-card text-card-foreground"><SelectItem value="paid">Pago</SelectItem><SelectItem value="pending">Pendente</SelectItem></SelectContent></Select>{toISODate(date) > toISODate(new Date()) && <p className="text-xs text-muted-foreground">Data futura entra como Pendente — vira paga quando você marcar.</p>}</div>
 
             {formType !== "transfer" && (
               <div className="space-y-2"><Label className="text-xs text-muted-foreground">Categoria</Label>{filteredCategories.length ? <Select value={categoryId || "none"} onValueChange={(value) => setCategoryId(value === "none" ? "" : value)}><SelectTrigger className="h-[42px] rounded-lg border-border bg-secondary text-foreground"><SelectValue placeholder="Selecione" /></SelectTrigger><SelectContent className="border-border bg-card text-card-foreground">{filteredCategories.map((category) => <SelectItem key={category.id} value={category.id}><span className="inline-flex items-center gap-2"><span className="h-2 w-2 rounded-full" style={{ backgroundColor: category.color || "hsl(var(--muted-foreground))" }} />{category.icon ? `${category.icon} ` : ""}{category.name}</span></SelectItem>)}</SelectContent></Select> : <p className="text-sm text-muted-foreground">Nenhuma categoria</p>}</div>

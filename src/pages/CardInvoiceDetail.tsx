@@ -363,7 +363,9 @@ const CardInvoiceDetailPage = () => {
         amount: parsed.data.amountCents / 100,
         date: parsed.data.date,
         category_id: parsed.data.categoryId,
-        status: parsed.data.status,
+        // status NÃO é gravado aqui: compras de cartão só são quitadas pelo
+        // "Pagar Fatura" (RPC pay_card_invoice). Marcar 'paid' avulso sumiria a
+        // dívida do limite e inflaria o Caixa Projetado sem debitar a conta.
         notes: parsed.data.notes?.trim() || null,
       })
       .eq("id", editing.id);
@@ -667,15 +669,10 @@ const CardInvoiceDetailPage = () => {
               </div>
               <div className="space-y-2">
                 <Label>Status</Label>
-                <Select value={status} onValueChange={(value) => setStatus(value as "paid" | "pending")}>
-                  <SelectTrigger className="h-[42px] rounded-lg border-border bg-secondary text-foreground">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent className="border-border bg-card text-card-foreground">
-                    <SelectItem value="paid">Pago</SelectItem>
-                    <SelectItem value="pending">Pendente</SelectItem>
-                  </SelectContent>
-                </Select>
+                <div className="flex h-[42px] items-center rounded-lg border border-border bg-secondary px-3">
+                  <span className={cn("text-sm font-semibold", status === "paid" ? "text-emerald-500" : "text-yellow-400")}>{status === "paid" ? "Paga" : "Pendente"}</span>
+                </div>
+                <p className="text-[11px] leading-tight text-muted-foreground">Quitada ao pagar a fatura.</p>
               </div>
             </div>
 
