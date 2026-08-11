@@ -105,7 +105,7 @@ const ReportsPage = () => {
       // fatura; status pra distinguir realizado de pendente.
       const { data } = await supabase
         .from("transactions")
-        .select("id, family_id, user_id, amount, type, date, status, card_id, description, category_id, categories(id, name, color)")
+        .select("id, family_id, user_id, amount, type, date, status, card_id, description, is_invoice_payment, category_id, categories(id, name, color)")
         .gte("date", from)
         .lte("date", to)
         .order("date", { ascending: true });

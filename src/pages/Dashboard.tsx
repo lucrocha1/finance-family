@@ -225,7 +225,7 @@ const DashboardPage = () => {
       const [txCurrent, txPrev, accountsRes, cardsRes, schedMonthRes, cardCommitRes, cardTxRes, cumulativePendingRes, activeDebtsRes, investmentsRes, paidSinceRes] = await Promise.all([
         supabase
           .from("transactions")
-          .select("id, family_id, user_id, card_id, category_id, amount, type, status, date, description, is_installment, is_recurring, categories ( id, name, icon, color )")
+          .select("id, family_id, user_id, card_id, category_id, amount, type, status, date, description, is_invoice_payment, is_installment, is_recurring, categories ( id, name, icon, color )")
           .gte("date", toISODate(monthStart))
           .lte("date", toISODate(monthEnd)),
         supabase

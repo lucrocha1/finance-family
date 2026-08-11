@@ -228,7 +228,7 @@ const GoalsPage = () => {
       // Carregamos todos até o mês selecionado e pegamos o mais recente
       // por categoria no memo budgetByCategory.
       supabase.from("budgets").select("id, category_id, amount, month, year, user_id, family_id"),
-      supabase.from("transactions").select("category_id, amount, type, date, card_id, description").eq("type", "expense").gte("date", from).lte("date", to),
+      supabase.from("transactions").select("category_id, amount, type, date, card_id, description, is_invoice_payment").eq("type", "expense").gte("date", from).lte("date", to),
       supabase.from("goals").select("*").order("created_at", { ascending: false }),
       supabase.from("goal_contributions").select("*").order("date", { ascending: false }),
       // Grupos de orçamento: teto sticky por grupo + junção categoria→grupo.
