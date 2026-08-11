@@ -162,6 +162,10 @@ const DashboardPage = () => {
   };
   const [cardTransactions, setCardTransactions] = useState<CardTxRow[]>([]);
   const [cumulativePendingTxs, setCumulativePendingTxs] = useState<Pick<TransactionRow, "id" | "card_id" | "amount" | "type" | "status" | "date">[]>([]);
+  // Movimento de caixa PAGO (não-cartão, receita−despesa) de monthStart em diante,
+  // inclusive meses seguintes. Usado só pra abrir o gráfico de Fluxo no saldo REAL
+  // do início do mês visualizado (meses passados/futuros).
+  const [paidNetSinceMonthStart, setPaidNetSinceMonthStart] = useState(0);
   // Dívidas ativas com due_date em [min(monthStart, hoje), monthEnd]. Usadas
   // tanto pra projeção cumulativa (Caixa Projetado) quanto pro Fluxo do
   // Período / gráfico de Fluxo de Caixa (mês visualizado).
@@ -218,7 +222,7 @@ const DashboardPage = () => {
       // usuário; filtrar family_id escondia linhas cujo family_id ficou defasado
       // (troca/entrada de família), fazendo o Dashboard divergir de
       // Reports/Transactions/Cards/Schedule que já removeram esse filtro.
-      const [txCurrent, txPrev, accountsRes, cardsRes, schedMonthRes, cardCommitRes, cardTxRes, cumulativePendingRes, activeDebtsRes, investmentsRes] = await Promise.all([
+      const [txCurrent, txPrev, accountsRes, cardsRes, schedMonthRes, cardCommitRes, cardTxRes, cumulativePendingRes, activeDebtsRes, investmentsRes, paidSinceRes] = await Promise.all([
         supabase
           .from("transactions")
           .select("id, family_id, user_id, card_id, category_id, amount, type, status, date, description, is_installment, is_recurring, categories ( id, name, icon, color )")
@@ -286,6 +290,16 @@ const DashboardPage = () => {
           .lte("due_date", cumulativeEndIso),
         // Investimentos do usuário (RLS isola) — resumo no Dashboard.
         supabase.from("investments").select("type, amount_invested, current_value"),
+        // Movimento pago (não-cartão) de monthStart em diante (sem teto superior),
+        // pra abrir a curva de Fluxo no saldo real do início do mês visualizado.
+        // Só receita/despesa; transferência é neutra ao saldo total.
+        supabase
+          .from("transactions")
+          .select("amount, type")
+          .eq("status", "paid")
+          .is("card_id", null)
+          .in("type", ["income", "expense"])
+          .gte("date", toISODate(monthStart)),
       ]);
 
       setTransactions((txCurrent.data as TransactionRow[] | null) ?? []);
@@ -298,6 +312,12 @@ const DashboardPage = () => {
       setActiveDebts((activeDebtsRes.data as (DebtForProjection & { due_date: string })[] | null) ?? []);
       setScheduledMonth((schedMonthRes.data as ScheduledPaymentRow[] | null) ?? []);
       setInvestments((investmentsRes.data as { type: string; amount_invested: number; current_value: number }[] | null) ?? []);
+      setPaidNetSinceMonthStart(
+        ((paidSinceRes.data as { amount: number; type: string }[] | null) ?? []).reduce(
+          (sum, t) => sum + (t.type === "income" ? Number(t.amount || 0) : -Number(t.amount || 0)),
+          0,
+        ),
+      );
       setLoading(false);
     };
 
@@ -593,20 +613,34 @@ const DashboardPage = () => {
     return { rows, total };
   }, [incomeTab, transactions]);
 
-  // Movimento de CAIXA realizado do mês (não-cartão, pago) — INCLUI pagamentos de
-  // fatura, pois num gráfico de SALDO eles movem o caixa de verdade (diferente do
-  // "Fluxo do período", que mede GASTO e exclui o pagamento).
-  const realizedMonthNet = useMemo(
-    () =>
-      transactions
-        .filter((tx) => !tx.card_id && tx.status === "paid" && (tx.type === "income" || tx.type === "expense"))
-        .reduce((sum, tx) => sum + (tx.type === "income" ? Number(tx.amount || 0) : -Number(tx.amount || 0)), 0),
-    [transactions],
-  );
-  // Saldo no INÍCIO do mês = saldo atual − movimento realizado do mês. A linha do
-  // Fluxo de Caixa começa aqui (em vez do zero), então a aba Realizado termina no
-  // Saldo atual e a Projetada no Caixa Projetado — batendo com os cards de cima.
-  const flowOpening = totalBankBalance - realizedMonthNet;
+  // Saldo REAL no início do mês visualizado — abertura da curva de Fluxo de Caixa.
+  // A curva de SALDO conta pagamentos de fatura (movem o caixa de verdade).
+  // - Mês atual/passado: saldo atual − TODO o movimento pago (não-cartão) de
+  //   monthStart em diante (inclui meses seguintes). Assim a curva de um mês
+  //   passado fecha no saldo daquele mês, não no saldo de hoje; e no mês atual
+  //   equivale ao movimento do próprio mês (a aba Realizado termina no Saldo atual).
+  // - Mês futuro: saldo projetado acumulado de hoje até o início do mês (soma os
+  //   meses intermediários). Assim a curva continua de onde o mês anterior
+  //   fecharia e termina exatamente no Caixa Projetado — sem "reiniciar" no saldo
+  //   de hoje ignorando as pendências no caminho.
+  const flowOpening = useMemo(() => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    if (monthStart > today) {
+      const monthStartIso = toISODate(monthStart);
+      const dayBeforeMonth = new Date(monthStart.getTime() - 86400000);
+      return computeProjectedCash({
+        totalBankBalance,
+        cumulativePendingTxs: cumulativePendingTxs.filter((tx) => tx.date < monthStartIso),
+        cards,
+        cardTransactions,
+        monthEnd: dayBeforeMonth,
+        today,
+        debts: cumulativeDebts,
+      }).projected;
+    }
+    return totalBankBalance - paidNetSinceMonthStart;
+  }, [monthStart, totalBankBalance, paidNetSinceMonthStart, cumulativePendingTxs, cards, cardTransactions, cumulativeDebts]);
 
   const flowData = useMemo(() => {
     const daysInMonth = monthEnd.getDate();
