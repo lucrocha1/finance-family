@@ -597,23 +597,28 @@ const TransactionsPage = () => {
           .order("installment_current", { ascending: true });
         if (error) errorMessage = error.message;
         if (!error && rows) {
-          // O campo de valor já mostra o valor de UMA parcela (openEdit carrega
-          // tx.amount). "Editar todas" aplica esse mesmo valor a cada parcela —
-          // não divide por N (antes dividia o valor de uma parcela por N,
-          // colapsando o total).
           const perInstallment = parsed.data.amountCents / 100;
+          // O campo de valor mostra UMA parcela já arredondada (ex.: 33,34 de um
+          // total de 100,00 em 3x). Se o usuário NÃO mexeu no valor, preserva o
+          // valor de cada parcela — aplicar 33,34 a todas mudaria o total pra
+          // 100,02. Se mexeu, aplica o novo valor a cada parcela (total = valor×N).
+          const amountUnchanged = Math.round(Number(editing.amount || 0) * 100) === parsed.data.amountCents;
+          // openEdit carrega a descrição da parcela COM o sufixo "(i/N)"; remove
+          // um sufixo do campo pra re-aplicar o correto a cada parcela (senão todas
+          // ficariam "(1/3)"). Status NÃO é alterado em massa: preserva o de cada
+          // parcela (evita marcar parcelas futuras como pagas).
+          const baseDesc = parsed.data.description.trim().replace(/\s*\(\d+\/\d+\)\s*$/, "");
           const updates = rows.map((row) =>
             supabase
               .from("transactions")
               .update({
-                description: parsed.data.description.trim(),
-                amount: perInstallment,
+                description: `${baseDesc} (${row.installment_current}/${row.installment_total})`,
+                ...(amountUnchanged ? {} : { amount: perInstallment }),
                 category_id: base.category_id,
                 account_id: base.account_id,
                 card_id: base.card_id,
                 notes: base.notes,
                 tags: base.tags,
-                status: base.status,
               })
               .eq("id", row.id),
           );
