@@ -93,8 +93,14 @@ export const computeProjectedCash = (input: ProjectedCashInput): ProjectedCashRe
     };
   }
 
-  const todayIso = toIso(today);
   const monthEndIso = toIso(input.monthEnd);
+  // Início da janela = início do mês visualizado OU hoje, o que vier ANTES.
+  // Assim obrigações vencidas e ainda não pagas DO MÊS (data < hoje) contam —
+  // continuam devidas e vão sair do caixa. Pra meses futuros o início vira hoje
+  // (comportamento inalterado, acumulando os meses intermediários).
+  const viewedMonthStart = new Date(input.monthEnd.getFullYear(), input.monthEnd.getMonth(), 1);
+  const windowStart = viewedMonthStart < today ? viewedMonthStart : today;
+  const windowStartIso = toIso(windowStart);
 
   const pendingIncome = input.cumulativePendingTxs
     .filter((tx) => tx.type === "income")
@@ -113,7 +119,7 @@ export const computeProjectedCash = (input: ProjectedCashInput): ProjectedCashRe
     const cursor = new Date(startMonth);
     while (cursor <= endMonth) {
       const cycle = getInvoiceCycleForMonth(closingDay, dueDay, cursor.getFullYear(), cursor.getMonth());
-      if (cycle.dueDate >= today && cycle.dueDate <= input.monthEnd) {
+      if (cycle.dueDate >= windowStart && cycle.dueDate <= input.monthEnd) {
         const cycleStartIso = toIso(cycle.cycleStart);
         const cycleEndIso = toIso(cycle.cycleEnd);
         const unpaid = input.cardTransactions
@@ -150,7 +156,7 @@ export const computeProjectedCash = (input: ProjectedCashInput): ProjectedCashRe
     let amount = 0;
     if (hasInstallments) {
       // Itera parcelas mensais a partir do due_date original. Soma cada
-      // parcela cuja data caia na janela [todayIso, monthEndIso], até
+      // parcela cuja data caia na janela [windowStartIso, monthEndIso], até
       // esgotar o remaining. Bug que isso corrige: empréstimo de 12x
       // R$ 500 só projetava 1 parcela (R$ 500) na janela de 6 meses,
       // quando deveria projetar 6× R$ 500.
@@ -163,12 +169,14 @@ export const computeProjectedCash = (input: ProjectedCashInput): ProjectedCashRe
         const day = Math.min(d, lastDay);
         const dateStr = `${cursorYear}-${String(cursorMonth + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
         if (dateStr > monthEndIso) break;
-        if (dateStr >= todayIso) {
+        if (dateStr >= windowStartIso) {
+          // Parcela dentro da janela (inclui vencida-não-paga do mês) — conta.
           const slice = Math.min(installment, remainingBudget);
           amount += slice;
           remainingBudget -= slice;
         } else {
-          // Parcela já passada (overdue) — não conta na janela futura
+          // Parcela ANTERIOR à janela (de meses passados) — consome o saldo
+          // devedor mas não entra na projeção do mês visualizado.
           remainingBudget = Math.max(0, remainingBudget - installment);
         }
         // Avança um mês
@@ -179,7 +187,7 @@ export const computeProjectedCash = (input: ProjectedCashInput): ProjectedCashRe
         }
       }
     } else {
-      if (debt.due_date < todayIso || debt.due_date > monthEndIso) continue;
+      if (debt.due_date < windowStartIso || debt.due_date > monthEndIso) continue;
       amount = remaining;
     }
 

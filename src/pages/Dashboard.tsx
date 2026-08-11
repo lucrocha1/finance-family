@@ -205,13 +205,15 @@ const DashboardPage = () => {
       const today = new Date();
       today.setHours(0, 0, 0, 0);
       const todayIso = toISODate(today);
-      // Janela cumulativa: de hoje até o fim do mês visualizado.
-      // Se o mês visualizado é passado, o range fica vazio (start > end) → sem projeção.
+      // Janela cumulativa: do início do mês visualizado (ou de hoje, o que vier
+      // ANTES) até o fim do mês visualizado. Começa em min(monthStart, hoje) — e
+      // NÃO em hoje — pra INCLUIR obrigações vencidas e ainda não pagas do mês
+      // (conta/fatura/parcela em atraso): elas continuam devidas e vão sair do
+      // caixa, então precisam entrar no Caixa Projetado. Assim o número bate com
+      // a curva "Projetado" do gráfico (que já conta o mês inteiro). Mês passado
+      // → range vazio (start > end) → sem projeção.
       const cumulativeEndIso = toISODate(monthEnd);
-      // Início da janela de dívidas: cobre o mês visualizado inteiro pra alimentar
-      // Fluxo do Período (que olha o mês todo) E a janela cumulativa hoje→monthEnd
-      // pra projeção (que pode ir além do mês visualizado quando navega pra futuro).
-      const debtStartIso = toISODate(monthStart < today ? monthStart : today);
+      const cumulativeStartIso = toISODate(monthStart < today ? monthStart : today);
       // Sem filtro de .eq("family_id"): a RLS (user_id = auth.uid()) já isola por
       // usuário; filtrar family_id escondia linhas cujo family_id ficou defasado
       // (troca/entrada de família), fazendo o Dashboard divergir de
@@ -261,14 +263,15 @@ const DashboardPage = () => {
             Date.now() + 90 * 86400000,
             monthEnd.getTime() + 30 * 86400000,
           )))),
-        // Pendências cumulativas (não-cartão) entre hoje e o fim do mês visualizado.
-        // Usado pra Caixa Projetado acumular meses futuros corretamente.
+        // Pendências cumulativas (não-cartão) na janela [min(monthStart,hoje), monthEnd].
+        // Inclui as vencidas-não-pagas do mês. Usado pra Caixa Projetado (acumula
+        // meses futuros e conta o que ainda vai sair).
         supabase
           .from("transactions")
           .select("id, card_id, amount, type, status, date")
           .neq("status", "paid")
           .is("card_id", null)
-          .gte("date", todayIso)
+          .gte("date", cumulativeStartIso)
           .lte("date", cumulativeEndIso),
         // Dívidas/empréstimos ativos com vencimento na janela
         // [min(monthStart, hoje), monthEnd]. Cobre tanto o mês visualizado
@@ -279,7 +282,7 @@ const DashboardPage = () => {
           .select("status, direction, due_date, total_with_interest, original_amount, amount_paid, has_installments, installment_amount")
           .eq("status", "active")
           .not("due_date", "is", null)
-          .gte("due_date", debtStartIso)
+          .gte("due_date", cumulativeStartIso)
           .lte("due_date", cumulativeEndIso),
         // Investimentos do usuário (RLS isola) — resumo no Dashboard.
         supabase.from("investments").select("type, amount_invested, current_value"),
@@ -319,14 +322,16 @@ const DashboardPage = () => {
     return activeDebts.filter((d) => d.due_date >= startIso && d.due_date <= endIso);
   }, [activeDebts, monthEnd, monthStart]);
 
-  // Dívidas na janela cumulativa hoje→monthEnd — alimentam Caixa Projetado.
+  // Dívidas na janela cumulativa [min(monthStart,hoje), monthEnd] — alimentam
+  // Caixa Projetado. Começa no início do mês (não em hoje) pra incluir parcelas
+  // vencidas e ainda não pagas do mês, que continuam devidas (bate com o gráfico).
   const cumulativeDebts = useMemo(() => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    const todayIso = toISODate(today);
+    const startIso = toISODate(monthStart < today ? monthStart : today);
     const endIso = toISODate(monthEnd);
-    return activeDebts.filter((d) => d.due_date >= todayIso && d.due_date <= endIso);
-  }, [activeDebts, monthEnd]);
+    return activeDebts.filter((d) => d.due_date >= startIso && d.due_date <= endIso);
+  }, [activeDebts, monthEnd, monthStart]);
 
   const totals = useMemo(() => {
     // O pagamento de fatura é transferência entre conta e cartão (neutro ao
